@@ -38,7 +38,6 @@ async function main() {
     email: args.email,
     password,
     name: args.name || null,
-    allowExistingAdmin: true,
   });
 
   console.log(

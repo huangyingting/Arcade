@@ -1,94 +1,19 @@
 import { prisma } from '@/lib/prisma';
 import { AccountAdmissionError } from './errors';
 import { hashPassword } from './passwords';
-import { accountAdmissionMode, isValidAccountEmail, normalizeAccountEmail } from './policy';
+import { isValidAccountEmail, normalizeAccountEmail } from './policy';
 
-export type BootstrapStatusView = {
-  needsBootstrap: boolean;
-  adminCount: number;
-  admins: Array<{
-    id: string;
-    email: string;
-    name: string;
-    role: string;
-    createdAt: string;
-  }>;
-  admissionMode: 'invitation-only' | 'public';
-  envBootstrapConfigured: boolean;
-  requiresSetupToken: boolean;
-};
-
-export async function ensureEnvBootstrapAdmin(): Promise<void> {
-  const rawEmail = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim();
-  const rawPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
-  if (!rawEmail || !rawPassword || rawPassword.length < 8) {
-    return;
-  }
-
-  const email = normalizeAccountEmail(rawEmail);
-  if (!isValidAccountEmail(email)) {
-    return;
-  }
-
-  const existing = await prisma.user.findUnique({
-    where: { email },
-    include: { passwordCredential: { select: { id: true } } },
-  });
-
-  if (existing && existing.role === 'Admin' && existing.passwordCredential) {
-    return;
-  }
-
-  await bootstrapAdmin({
-    email,
-    password: rawPassword,
-    name: process.env.BOOTSTRAP_ADMIN_NAME?.trim() || 'Bootstrap Admin',
-    allowExistingAdmin: true,
-  });
-}
-
-export async function getBootstrapStatus(): Promise<BootstrapStatusView> {
-  await ensureEnvBootstrapAdmin();
-
-  const admins = await prisma.user.findMany({
-    where: { role: 'Admin' },
-    orderBy: { createdAt: 'asc' },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      createdAt: true,
-    },
-  });
-
-  const adminCount = admins.length;
-  const configuredToken = Boolean(process.env.BOOTSTRAP_ADMIN_TOKEN?.trim());
-
-  return {
-    needsBootstrap: adminCount === 0,
-    adminCount,
-    admins: admins.map((a) => ({
-      id: a.id,
-      email: a.email,
-      name: a.name,
-      role: a.role,
-      createdAt: a.createdAt.toISOString(),
-    })),
-    admissionMode: accountAdmissionMode(),
-    envBootstrapConfigured: Boolean(
-      process.env.BOOTSTRAP_ADMIN_EMAIL?.trim() && process.env.BOOTSTRAP_ADMIN_PASSWORD
-    ),
-    requiresSetupToken: adminCount > 0 || configuredToken,
-  };
-}
-
+/**
+ * Provisions or promotes a root Administrator account from the deployment host CLI
+ * (`npm run bootstrap:admin -- --email <email> --password-stdin`).
+ *
+ * Security invariant: Never exposed via an HTTP API endpoint or public web route.
+ * Only an operator with shell/deployment access to the host and database can execute this.
+ */
 export async function bootstrapAdmin(input: {
   email: string;
   password: string;
   name?: string | null;
-  setupToken?: string | null;
-  allowExistingAdmin?: boolean;
 }) {
   const email = normalizeAccountEmail(input.email);
   if (!isValidAccountEmail(input.email)) {
@@ -110,25 +35,8 @@ export async function bootstrapAdmin(input: {
   const passwordHash = await hashPassword(input.password);
   const now = new Date();
   const displayName = input.name?.trim() || email.split('@')[0] || 'Workspace Admin';
-  const expectedToken =
-    process.env.BOOTSTRAP_ADMIN_TOKEN?.trim() || 'arcade-bootstrap-admin-2026';
 
   return prisma.$transaction(async (tx) => {
-    const adminCount = await tx.user.count({
-      where: { role: 'Admin' },
-    });
-
-    if (adminCount > 0 && !input.allowExistingAdmin) {
-      const provided = input.setupToken?.trim() || '';
-      if (!provided || provided !== expectedToken) {
-        throw new AccountAdmissionError(
-          409,
-          'admin_exists',
-          'An administrator already exists. Sign in as an existing Admin or provide the Bootstrap Setup Token.'
-        );
-      }
-    }
-
     const existing = await tx.user.findUnique({
       where: { email },
     });
