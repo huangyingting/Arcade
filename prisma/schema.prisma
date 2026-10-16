@@ -1,0 +1,530 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// NEXTAUTH MODELS
+// ============================================================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model PasswordCredential {
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  passwordHash      String
+  passwordChangedAt DateTime  @default(now())
+  resetTokenHash    String?   @unique
+  resetExpiresAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([resetExpiresAt])
+}
+
+model PendingRegistration {
+  id              String   @id @default(cuid())
+  email           String
+  normalizedEmail String   @unique
+  name            String?
+  passwordHash    String
+  tokenHash       String   @unique
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
+model AccountInvitation {
+  id              String    @id @default(cuid())
+  email           String
+  normalizedEmail String
+  activeForEmail  String?   @unique
+  tokenHash       String?   @unique
+  status          String    @default("PENDING") // "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED"
+  invitedById     String?
+  acceptedById    String?
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now()) @updatedAt
+
+  invitedBy  User?                @relation("AccountInvitationInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+  acceptedBy User?                @relation("AccountInvitationAcceptor", fields: [acceptedById], references: [id], onDelete: SetNull)
+  emails     AccountEmailOutbox[]
+
+  @@index([status, expiresAt])
+  @@index([normalizedEmail, createdAt])
+  @@index([invitedById])
+  @@index([acceptedById])
+}
+
+model AccountEmailOutbox {
+  id            String    @id @default(cuid())
+  payload       String
+  status        String    @default("pending")
+  claimToken    String?
+  lastAttemptAt DateTime?
+  lastError     String?
+  sentAt        DateTime?
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  invitationId  String?
+
+  invitation AccountInvitation? @relation(fields: [invitationId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([invitationId])
+}
+
+// ============================================================================
+// USER, WORKSPACE & TEAM RBAC MODELS
+// ============================================================================
+
+model User {
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  emailVerified       DateTime?
+  name                String    @default("jack wolf")
+  image               String?
+  role                String    @default("Admin") // "Admin" | "Creator" | "Viewer"
+  passwordHash        String?
+  onboardingRole      String?   @default("Product Engineering")
+  onboardingGoalsJson String    @default("[\"Interactive Demos\",\"AI Videos\",\"AI Visuals\"]")
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  accounts                   Account[]
+  sessions                   Session[]
+  passwordCredential         PasswordCredential?
+  accountInvitationsSent     AccountInvitation[] @relation("AccountInvitationInviter")
+  accountInvitationsAccepted AccountInvitation[] @relation("AccountInvitationAcceptor")
+  memberships                WorkspaceMember[]
+  teamMemberships            TeamMember[]
+  createdFlows               Flow[]
+  createdVideos              PromptVideo[]
+  createdVisuals             VisualProject[]
+  createdCollections         Collection[]
+  notifications              InboxNotification[]
+}
+
+model Workspace {
+  id                        String   @id @default(cuid())
+  name                      String
+  slug                      String   @unique
+  iconUrl                   String?
+  planTier                  String   @default("FREE") // "FREE" | "PRO" | "GROWTH" | "ENTERPRISE"
+  billingInterval           String   @default("annual") // "monthly" | "annual"
+  monthlyCreditsQuota       Int      @default(200)
+  bonusCreditsBalance       Int      @default(200)
+  usedCreditsThisCycle      Int      @default(100)
+  onboardingChecklistJson   String   @default("{\"brandKit\":true,\"video\":true,\"demo\":true,\"visuals\":true,\"share\":true,\"claimedBonus\":true}")
+  privacySettingsJson       String   @default("{\"collectViewerAnalytics\":true,\"showCookieBanner\":false,\"anonymizeIp\":false,\"retentionDays\":365}")
+  translationSettingsJson   String   @default("{\"defaultLocale\":\"en\",\"targetLocales\":[\"es\",\"fr\",\"de\",\"ja\",\"zh-CN\"],\"glossary\":[]}")
+  pronunciationRulesJson    String   @default("[{\"id\":\"pr1\",\"word\":\"SC-100\",\"replacement\":\"S C One Hundred\"},{\"id\":\"pr2\",\"word\":\"genisisiq\",\"replacement\":\"Genesis I Q\"}]")
+  syntheticVoicesJson       String   @default("{\"defaultVoiceId\":\"ava-natural\",\"customVoices\":[]}")
+  advancedSettingsJson      String   @default("{\"ssoEnabled\":false,\"samlEntryPoint\":\"\",\"scimEnabled\":false}")
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  members            WorkspaceMember[]
+  teams              Team[]
+  folders            Folder[]
+  brandKits          BrandKit[]
+  flows              Flow[]
+  promptVideos       PromptVideo[]
+  visualProjects     VisualProject[]
+  collections        Collection[]
+  leads              LeadCapture[]
+  analyticsEvents    AnalyticsEvent[]
+  creditTransactions CreditTransaction[]
+  memories           WorkspaceMemory[]
+  connectors         WorkspaceConnector[]
+  integrations       WorkspaceIntegration[]
+  customLinks        CustomLink[]
+  notifications      InboxNotification[]
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String   @default("OWNER") // "OWNER" | "ADMIN" | "EDITOR" | "VIEWER"
+  joinedAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  slug        String
+  iconColor   String   @default("#4F46E5")
+  isPersonal  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members   TeamMember[]
+  folders   Folder[]
+  flows     Flow[]
+
+  @@unique([workspaceId, slug])
+}
+
+model TeamMember {
+  id     String @id @default(cuid())
+  teamId String
+  userId String
+  role   String @default("ADMIN")
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+}
+
+model Folder {
+  id          String   @id @default(cuid())
+  workspaceId String
+  teamId      String?
+  name        String
+  parentId    String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team      Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  flows     Flow[]
+}
+
+// ============================================================================
+// BRAND KIT (13-TAB SCHEMA)
+// ============================================================================
+
+model BrandKit {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  name               String
+  sourceUrl          String
+  isDefault          Boolean  @default(false)
+  status             String   @default("READY")
+  sourcesJson        String   @default("[]")
+  logosJson          String   @default("{}")
+  colorsJson         String   @default("[]")
+  fontsJson          String   @default("{}")
+  photographyJson    String   @default("[]")
+  backgroundsJson    String   @default("[]")
+  illustrationsJson  String   @default("[]")
+  productJson        String   @default("{}")
+  voiceJson          String   @default("{}")
+  tonesJson          String   @default("[]")
+  demoSettingsJson   String   @default("{}")
+  sharePageJson      String   @default("{}")
+  customElementsJson String   @default("[]")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  flows          Flow[]
+  promptVideos   PromptVideo[]
+  visualProjects VisualProject[]
+}
+
+// ============================================================================
+// INTERACTIVE DEMO (FLOW)
+// ============================================================================
+
+model Flow {
+  id               String   @id @default(cuid())
+  shareId          String   @unique @default(cuid())
+  workspaceId      String
+  teamId           String?
+  folderId         String?
+  brandKitId       String?
+  createdById      String
+  name             String   @default("Untitled Demo")
+  description      String?
+  status           String   @default("PUBLISHED") // "DRAFT" | "PUBLISHED" | "ARCHIVED" | "DELETED"
+  visibility       String   @default("PUBLIC")    // "PUBLIC" | "LINK_ONLY" | "PRIVATE"
+  aspectRatio      String   @default("16:9")
+  thumbnailUrl     String?
+  stepsJson        String   @default("[]")
+  designJson       String   @default("{}")
+  variablesJson    String   @default("[]")
+  translationsJson String   @default("{}")
+  menuJson         String   @default("{\"enabled\":true,\"items\":[]}")
+  tagsJson         String   @default("[]")
+  viewsCount       Int      @default(0)
+  completionsCount Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team      Team?         @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  folder    Folder?       @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  brandKit  BrandKit?     @relation(fields: [brandKitId], references: [id], onDelete: SetNull)
+  createdBy User          @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  versions  FlowVersion[]
+}
+
+model FlowVersion {
+  id            String   @id @default(cuid())
+  flowId        String
+  versionNumber Int
+  stepsJson     String
+  designJson    String
+  createdAt     DateTime @default(now())
+
+  flow Flow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// AI VIDEO STUDIO & 5-TRACK NLE
+// ============================================================================
+
+model PromptVideo {
+  id                String   @id @default(cuid())
+  shareId           String   @unique @default(cuid())
+  workspaceId       String
+  brandKitId        String?
+  createdById       String
+  name              String   @default("Untitled AI Video")
+  prompt            String
+  sourceUrl         String?
+  aspectRatio       String   @default("16:9")
+  durationSec       Int      @default(30)
+  fps               Int      @default(30)
+  status            String   @default("PUBLISHED")
+  currentVersion    Int      @default(1)
+  thumbnailUrl      String?
+  scenesJson        String   @default("[]")
+  designSchemaJson  String   @default("{}")
+  designValuesJson  String   @default("{}")
+  timelineJson      String   @default("{}")
+  pronunciationJson String   @default("[]")
+  exportsJson       String   @default("[]")
+  viewsCount        Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brandKit  BrandKit?            @relation(fields: [brandKitId], references: [id], onDelete: SetNull)
+  createdBy User                 @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  sessions  PromptVideoSession[]
+}
+
+model PromptVideoSession {
+  id            String   @id @default(cuid())
+  promptVideoId String
+  versionNumber Int      @default(1)
+  state         String   @default("COMPLETED")
+  stagesJson    String   @default("[]")
+  messagesJson  String   @default("[]")
+  summaryText   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  promptVideo PromptVideo @relation(fields: [promptVideoId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// AI VISUALS STUDIO & MULTI-FORMAT CANVAS EDITOR
+// ============================================================================
+
+model VisualProject {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  brandKitId    String?
+  createdById   String
+  name          String   @default("Visual project")
+  category      String   @default("social_announcement")
+  prompt        String
+  sourceFlowId  String?
+  status        String   @default("PUBLISHED")
+  thumbnailUrl  String?
+  visualsJson   String   @default("[]")
+  templatesJson String   @default("[]")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brandKit  BrandKit? @relation(fields: [brandKitId], references: [id], onDelete: SetNull)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// COLLECTIONS, ANALYTICS, LEADS, MEMORY, CONNECTORS & INTEGRATIONS
+// ============================================================================
+
+model Collection {
+  id          String   @id @default(cuid())
+  shareId     String   @unique @default(cuid())
+  workspaceId String
+  createdById String
+  name        String   @default("Untitled Collection")
+  status      String   @default("PUBLISHED")
+  headerJson  String   @default("{}")
+  itemsJson   String   @default("[]")
+  viewsCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+}
+
+model AnalyticsEvent {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  assetType     String
+  assetId       String
+  assetTitle    String
+  visitorId     String
+  visitorEmail  String?
+  companyName   String?
+  companyDomain String?
+  country       String   @default("United States")
+  deviceType    String   @default("Desktop")
+  eventType     String
+  stepIndex     Int?
+  durationMs    Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model LeadCapture {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  flowId         String
+  flowTitle      String
+  email          String
+  fullName       String?
+  company        String?
+  role           String?
+  stepsCompleted Int      @default(1)
+  totalSteps     Int      @default(1)
+  syncedToCrm    Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model CreditTransaction {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  actorEmail   String
+  actionType   String
+  creditsDelta Int
+  description  String
+  createdAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model WorkspaceMemory {
+  id          String   @id @default(cuid())
+  workspaceId String
+  category    String
+  title       String
+  content     String
+  source      String   @default("Brand Kit AI")
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model WorkspaceConnector {
+  id          String    @id @default(cuid())
+  workspaceId String
+  provider    String
+  name        String
+  status      String    @default("DISCONNECTED")
+  lastSyncAt  DateTime?
+  configJson  String    @default("{}")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model WorkspaceIntegration {
+  id          String   @id @default(cuid())
+  workspaceId String
+  provider    String
+  status      String   @default("DISCONNECTED")
+  configJson  String   @default("{}")
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model CustomLink {
+  id          String   @id @default(cuid())
+  workspaceId String
+  assetType   String
+  assetId     String
+  slug        String   @unique
+  recipient   String?
+  viewsCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model InboxNotification {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String?
+  type        String
+  title       String
+  body        String
+  actionUrl   String?
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+}

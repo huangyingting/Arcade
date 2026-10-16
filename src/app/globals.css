@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-canvas-app: #FFFFFF;
+  --bg-sidebar-app: #F8FAFC;
+  --bg-surface-muted: #F1F5F9;
+  --bg-surface-hover: #E2E8F0;
+  --bg-editor-dark: #0D0E12;
+  --bg-editor-panel: #16181F;
+  --bg-editor-track: #1E212B;
+
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-tertiary: #94A3B8;
+  --text-on-dark: #F8FAFC;
+
+  --accent-indigo: #4F46E5;
+  --accent-indigo-hover: #4338CA;
+  --accent-indigo-soft: #EEF2FF;
+  --accent-violet: #7C3AED;
+  --accent-emerald: #10B981;
+  --accent-amber: #F59E0B;
+  --accent-rose: #EF4444;
+
+  --whoami-gold: #D4AF37;
+  --whoami-crimson: #C42B1C;
+  --whoami-cobalt: #0047AB;
+  --whoami-obsidian: #111111;
+  --whoami-cream: #F4EFE6;
+}
+
+body {
+  color: var(--text-primary);
+  background: var(--bg-canvas-app);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom sleek scrollbars for NLE timeline and sidebars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
