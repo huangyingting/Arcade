@@ -148,6 +148,12 @@ export default function AdminInvitationsPage() {
 
           <div className="flex items-center gap-3 text-xs">
             <Link
+              href="/admin/bootstrap"
+              className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 font-semibold text-indigo-700 hover:bg-indigo-100"
+            >
+              Bootstrap Admin
+            </Link>
+            <Link
               href="/invite/demo-invite-token-2026"
               className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 font-semibold text-amber-800 hover:bg-amber-100"
             >

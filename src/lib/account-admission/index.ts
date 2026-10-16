@@ -6,3 +6,6 @@ export * from './session';
 export * from './invitations';
 export * from './registration';
 export * from './credentials';
+export * from './bootstrap';
+export * from './social';
+
