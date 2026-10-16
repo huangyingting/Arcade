@@ -20,8 +20,8 @@ const toPct = (v: number | undefined, fallback = 50) => {
   return v <= 1 && v >= 0 ? Math.round(v * 1000) / 10 : v;
 };
 
-export default function PublicFlowSharePage({ params }: { params: { id: string } }) {
-  const { id } = params;
+export default function PublicFlowSharePage({ params: rawParams }: { params: Promise<{ id: string }> }) {
+  const { id } = React.use(rawParams);
   const searchParams = useSearchParams();
   const [flow, setFlow] = useState<any>(null);
   const [steps, setSteps] = useState<any[]>([]);

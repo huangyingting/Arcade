@@ -21,11 +21,11 @@ type InvitationView = {
 };
 
 export default function InvitationPage({
-  params,
+  params: rawParams,
 }: {
-  params: { token: string };
+  params: Promise<{ token: string }>;
 }) {
-  const { token } = params;
+  const { token } = React.use(rawParams);
   const router = useRouter();
   const [invitation, setInvitation] = useState<InvitationView | null>(null);
   const [loading, setLoading] = useState(true);

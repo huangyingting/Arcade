@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { MarketingHeader, MarketingFooter } from '@/components/marketing/MarketingChrome';
 import { ArrowRight, CheckCircle2, Globe, Sparkles } from 'lucide-react';
 
-export default function ProductSlugPage({ params }: { params: { slug: string } }) {
+export default function ProductSlugPage({ params: rawParams }: { params: Promise<{ slug: string }> }) {
+  const params = React.use(rawParams);
   const router = useRouter();
   const [urlInput, setUrlInput] = useState('https://whoami.genisisiq.com');
   const [creating, setCreating] = useState(false);

@@ -6,8 +6,9 @@ import {
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params: rawParams }: { params: Promise<{ id: string }> }
 ) {
+  const params = await rawParams;
   try {
     const body = await request.json().catch(() => ({}));
     const expiresAt = body.expiresAt ? new Date(String(body.expiresAt)) : undefined;

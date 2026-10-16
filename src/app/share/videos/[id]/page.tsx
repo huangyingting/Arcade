@@ -4,8 +4,8 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Download, ExternalLink, Sparkles, Play } from 'lucide-react';
 
-export default function PublicVideoSharePage({ params }: { params: { id: string } }) {
-  const { id } = params;
+export default function PublicVideoSharePage({ params: rawParams }: { params: Promise<{ id: string }> }) {
+  const { id } = React.use(rawParams);
   const [video, setVideo] = useState<any>(null);
   const [scenes, setScenes] = useState<any[]>([]);
 

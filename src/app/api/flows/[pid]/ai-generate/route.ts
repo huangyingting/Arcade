@@ -4,8 +4,9 @@ import { callAzureOpenAiJson, synthesizeSpeechAudio } from '@/lib/production-eng
 
 export async function POST(
   request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json().catch(() => ({}));
   const prompt = body.prompt || 'Polish all hotspot tooltips, callouts, and voiceover scripts with concise executive clarity.';
   const tone = body.tone || 'Product Launch';

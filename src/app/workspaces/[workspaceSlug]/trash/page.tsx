@@ -4,7 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { Trash2, RotateCcw } from 'lucide-react';
 
-export default function TrashPage({ params }: { params: { workspaceSlug: string } }) {
+export default function TrashPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const [workspace, setWorkspace] = useState<any>(null);
 
   useEffect(() => {

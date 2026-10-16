@@ -3,8 +3,9 @@ import { prisma } from '@/lib/prisma';
 
 export async function GET(
   _request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   let video = await prisma.promptVideo.findFirst({
     where: { OR: [{ id: params.pid }, { shareId: params.pid }] },
     include: {
@@ -30,8 +31,9 @@ export async function GET(
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json();
   const video = await prisma.promptVideo.findFirst({
     where: { OR: [{ id: params.pid }, { shareId: params.pid }] },
@@ -66,8 +68,9 @@ export async function PATCH(
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   const video = await prisma.promptVideo.findFirst({
     where: { OR: [{ id: params.pid }, { shareId: params.pid }] },
   });

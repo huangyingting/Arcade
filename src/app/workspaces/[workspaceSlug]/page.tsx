@@ -24,11 +24,11 @@ import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { UI_DICTIONARY, SupportedUiLang, getSavedUiLang } from '@/lib/i18n';
 
 export default function WorkspaceHomePage({
-  params,
+  params: rawParams,
 }: {
-  params: { workspaceSlug: string };
+  params: Promise<{ workspaceSlug: string }>;
 }) {
-  const { workspaceSlug } = params;
+  const { workspaceSlug } = React.use(rawParams);
   const router = useRouter();
   const [lang, setLang] = useState<SupportedUiLang>('en');
 

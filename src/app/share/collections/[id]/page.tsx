@@ -4,8 +4,8 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ExternalLink, Play, Film, Sparkles } from 'lucide-react';
 
-export default function PublicCollectionSharePage({ params }: { params: { id: string } }) {
-  const { id } = params;
+export default function PublicCollectionSharePage({ params: rawParams }: { params: Promise<{ id: string }> }) {
+  const { id } = React.use(rawParams);
   const [collection, setCollection] = useState<any>(null);
   const [header, setHeader] = useState<any>({});
   const [items, setItems] = useState<any[]>([]);

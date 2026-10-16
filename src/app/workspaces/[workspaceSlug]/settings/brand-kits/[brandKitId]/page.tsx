@@ -44,11 +44,11 @@ const BRAND_KIT_TABS = [
 ] as const;
 
 export default function BrandKitEditorPage({
-  params,
+  params: rawParams,
 }: {
-  params: { workspaceSlug: string; brandKitId: string };
+  params: Promise<{ workspaceSlug: string; brandKitId: string }>;
 }) {
-  const { workspaceSlug, brandKitId } = params;
+  const { workspaceSlug, brandKitId } = React.use(rawParams);
   const [activeTab, setActiveTab] = useState<(typeof BRAND_KIT_TABS)[number]['id']>('overview');
   const [brandKit, setBrandKit] = useState<any>(null);
 

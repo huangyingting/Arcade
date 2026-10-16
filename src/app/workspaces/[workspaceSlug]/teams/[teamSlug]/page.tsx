@@ -16,11 +16,11 @@ import {
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 
 export default function TeamLibraryPage({
-  params,
+  params: rawParams,
 }: {
-  params: { workspaceSlug: string; teamSlug: string };
+  params: Promise<{ workspaceSlug: string; teamSlug: string }>;
 }) {
-  const { workspaceSlug, teamSlug } = params;
+  const { workspaceSlug, teamSlug } = React.use(rawParams);
   const [filterType, setFilterType] = useState<'ALL' | 'FLOW' | 'VIDEO' | 'VISUAL' | 'COLLECTION'>('ALL');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [query, setQuery] = useState('');

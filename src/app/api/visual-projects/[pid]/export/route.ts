@@ -4,8 +4,9 @@ import { renderVisualCardExport } from '@/lib/production-engine/media-renderer';
 
 export async function POST(
   request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json().catch(() => ({}));
   const format = (body.format || 'png') as 'png' | 'mp4';
   const visual = body.visual;

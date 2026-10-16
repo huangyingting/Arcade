@@ -4,8 +4,9 @@ import { renderPromptVideoMp4 } from '@/lib/production-engine/media-renderer';
 
 export async function POST(
   request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json().catch(() => ({}));
   const resolution = (body.resolution || '1080p') as '720p' | '1080p' | '4K';
   const fps = Number(body.fps || 30);

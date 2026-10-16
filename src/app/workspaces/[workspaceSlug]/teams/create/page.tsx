@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { Users, ArrowRight, ShieldCheck } from 'lucide-react';
 
-export default function CreateTeamPage({ params }: { params: { workspaceSlug: string } }) {
+export default function CreateTeamPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const router = useRouter();
   const [name, setName] = useState('Cloud Architecture GTM');
   const [visibility, setVisibility] = useState<'workspace' | 'private'>('workspace');

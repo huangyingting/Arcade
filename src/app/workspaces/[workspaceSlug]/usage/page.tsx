@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { Coins } from 'lucide-react';
 
-export default function UsagePage({ params }: { params: { workspaceSlug: string } }) {
+export default function UsagePage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const [workspace, setWorkspace] = useState<any>(null);
 
   useEffect(() => {

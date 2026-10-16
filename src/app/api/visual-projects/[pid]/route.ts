@@ -18,8 +18,9 @@ const AVERY_BACKGROUNDS = [
 
 export async function GET(
   _request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   let project = await prisma.visualProject.findUnique({
     where: { id: params.pid },
     include: { brandKit: true },
@@ -35,8 +36,9 @@ export async function GET(
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json();
   const project = await prisma.visualProject.findUnique({
     where: { id: params.pid },

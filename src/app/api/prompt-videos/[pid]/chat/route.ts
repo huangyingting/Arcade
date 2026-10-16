@@ -4,8 +4,9 @@ import { callAzureOpenAiJson } from '@/lib/production-engine/ai-provider';
 
 export async function POST(
   request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json().catch(() => ({}));
   const message = (body.message || 'Make the headline bolder').trim();
   const targetSceneId = body.targetSceneId || null;

@@ -4,7 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { CheckCircle2, RefreshCw, XCircle } from 'lucide-react';
 
-export default function ConnectorsPage({ params }: { params: { workspaceSlug: string } }) {
+export default function ConnectorsPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const [connectors, setConnectors] = useState<any[]>([]);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 

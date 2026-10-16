@@ -4,7 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { Brain, Plus, Trash2 } from 'lucide-react';
 
-export default function MemoryPage({ params }: { params: { workspaceSlug: string } }) {
+export default function MemoryPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const [memories, setMemories] = useState<any[]>([]);
   const [category, setCategory] = useState('Product Fact');
   const [title, setTitle] = useState('');

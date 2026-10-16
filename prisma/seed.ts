@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import { createHash, randomBytes, scrypt as nodeScrypt } from 'node:crypto';
-
-const prisma = new PrismaClient();
+import { prisma } from '../src/lib/prisma';
 
 function hashOpaqueToken(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('base64url');

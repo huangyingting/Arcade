@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { TrendingUp, DollarSign, Users, CheckCircle2, ExternalLink } from 'lucide-react';
 
-export default function ImpactAnalysisPage({ params }: { params: { workspaceSlug: string } }) {
+export default function ImpactAnalysisPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const [data, setData] = useState<any>({ events: [], flows: [], videos: [], leads: [] });
   const [avgDealSize, setAvgDealSize] = useState(24000);
 

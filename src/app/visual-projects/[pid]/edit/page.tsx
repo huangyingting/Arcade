@@ -17,8 +17,8 @@ import {
 } from 'lucide-react';
 import { VISUAL_SIZE_PRESETS, VISUAL_TEMPLATES } from '@/types/domain';
 
-export default function VisualProjectEditorPage({ params }: { params: { pid: string } }) {
-  const { pid } = params;
+export default function VisualProjectEditorPage({ params: rawParams }: { params: Promise<{ pid: string }> }) {
+  const { pid } = React.use(rawParams);
   const [project, setProject] = useState<any>(null);
   const [visuals, setVisuals] = useState<any[]>([]);
   const [activeVisualIdx, setActiveVisualIdx] = useState(0);

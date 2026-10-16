@@ -4,7 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { Archive, RotateCcw } from 'lucide-react';
 
-export default function ArchivePage({ params }: { params: { workspaceSlug: string } }) {
+export default function ArchivePage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const [workspace, setWorkspace] = useState<any>(null);
 
   async function load() {

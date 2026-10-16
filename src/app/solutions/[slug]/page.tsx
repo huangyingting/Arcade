@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { MarketingHeader, MarketingFooter } from '@/components/marketing/MarketingChrome';
 import { ArrowRight, CheckCircle2, Layers, Play } from 'lucide-react';
 
-export default function SolutionSlugPage({ params }: { params: { slug: string } }) {
+export default async function SolutionSlugPage({ params: rawParams }: { params: Promise<{ slug: string }> }) {
+  const params = await rawParams;
   const solutionDetails: Record<
     string,
     { title: string; metric: string; metricLabel: string; useCases: string[] }

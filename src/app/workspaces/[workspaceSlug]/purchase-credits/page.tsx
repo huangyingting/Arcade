@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { Coins, Check } from 'lucide-react';
 
-export default function PurchaseCreditsPage({ params }: { params: { workspaceSlug: string } }) {
+export default function PurchaseCreditsPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const router = useRouter();
   const [buying, setBuying] = useState(false);
 

@@ -3,8 +3,9 @@ import { prisma } from '@/lib/prisma';
 
 export async function GET(
   _request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   let flow = await prisma.flow.findFirst({
     where: {
       OR: [{ id: params.pid }, { shareId: params.pid }],
@@ -30,15 +31,17 @@ export async function GET(
 
 export async function PUT(
   request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   return updateFlow(request, params.pid);
 }
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   return updateFlow(request, params.pid);
 }
 
@@ -75,8 +78,9 @@ async function updateFlow(request: Request, pid: string) {
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   const flow = await prisma.flow.findFirst({
     where: { OR: [{ id: params.pid }, { shareId: params.pid }] },
   });

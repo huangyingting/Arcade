@@ -16,8 +16,9 @@ const LOCALE_LABELS: Record<string, { label: string; prefix: string }> = {
 
 export async function POST(
   request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json().catch(() => ({}));
   const locale = body.locale || 'zh-CN';
   const meta = LOCALE_LABELS[locale] || { label: locale, prefix: `[${locale.toUpperCase()}]` };

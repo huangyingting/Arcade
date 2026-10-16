@@ -3,8 +3,9 @@ import { revokeAccountInvitation } from '@/lib/account-admission';
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params: rawParams }: { params: Promise<{ id: string }> }
 ) {
+  const params = await rawParams;
   try {
     const invitation = await revokeAccountInvitation(params.id);
     return NextResponse.json({

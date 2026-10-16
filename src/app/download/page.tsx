@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { MarketingHeader, MarketingFooter } from '@/components/marketing/MarketingChrome';
-import { Chrome, Monitor, Download, ArrowRight, Globe, Sparkles } from 'lucide-react';
+import { Compass, Monitor, Download, ArrowRight, Globe, Sparkles } from 'lucide-react';
 
 export default function DownloadPage() {
   const router = useRouter();
@@ -79,7 +79,7 @@ export default function DownloadPage() {
 
         <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
           <div className="rounded-2xl border border-slate-200 p-8 shadow-sm">
-            <Chrome className="h-10 w-10 text-indigo-600" />
+            <Compass className="h-10 w-10 text-indigo-600" />
             <h2 className="mt-4 text-2xl font-bold">Arcade Chrome Extension (Manifest V3)</h2>
             <p className="mt-2 text-sm text-slate-600">
               Download the packaged Manifest V3 extension (<code>manifest.json</code>, <code>content.js</code>, <code>background.js</code>, <code>popup.html</code>) to capture real-time browser clicks and upload directly to your Arcade Studio.

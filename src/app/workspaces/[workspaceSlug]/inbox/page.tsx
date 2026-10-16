@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { CheckCircle2, ExternalLink, CheckCheck } from 'lucide-react';
 
-export default function InboxPage({ params }: { params: { workspaceSlug: string } }) {
+export default function InboxPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const [notifications, setNotifications] = useState<any[]>([]);
 
   useEffect(() => {

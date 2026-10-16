@@ -37,8 +37,8 @@ const toPct = (v: number | undefined, fallback = 50) => {
   return v <= 1 && v >= 0 ? Math.round(v * 1000) / 10 : v;
 };
 
-export default function FlowEditorPage({ params }: { params: { pid: string } }) {
-  const { pid } = params;
+export default function FlowEditorPage({ params: rawParams }: { params: Promise<{ pid: string }> }) {
+  const { pid } = React.use(rawParams);
   const [flow, setFlow] = useState<any>(null);
   const [steps, setSteps] = useState<any[]>([]);
   const [activeStepIdx, setActiveStepIdx] = useState(0);

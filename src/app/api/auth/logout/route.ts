@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { SESSION_COOKIES, SESSION_COOKIE_NAME } from '@/lib/account-admission';
 
 export async function POST() {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   for (const name of SESSION_COOKIES) {
     const token = cookieStore.get(name)?.value;
     if (token) {

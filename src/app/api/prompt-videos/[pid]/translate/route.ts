@@ -14,8 +14,9 @@ const LOCALE_NAMES: Record<string, string> = {
 
 export async function POST(
   request: Request,
-  { params }: { params: { pid: string } }
+  { params: rawParams }: { params: Promise<{ pid: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json().catch(() => ({}));
   const locale = body.locale || 'zh-CN';
   const langName = LOCALE_NAMES[locale] || locale;

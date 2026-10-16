@@ -4,7 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { Users, Download, Plus } from 'lucide-react';
 
-export default function LeadsPage({ params }: { params: { workspaceSlug: string } }) {
+export default function LeadsPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const [leads, setLeads] = useState<any[]>([]);
   const [email, setEmail] = useState('');
   const [company, setCompany] = useState('');

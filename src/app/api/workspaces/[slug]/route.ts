@@ -22,8 +22,9 @@ const WORKSPACE_INCLUDE = {
 
 export async function GET(
   _request: Request,
-  { params }: { params: { slug: string } }
+  { params: rawParams }: { params: Promise<{ slug: string }> }
 ) {
+  const params = await rawParams;
   let workspace = await prisma.workspace.findUnique({
     where: { slug: params.slug },
     include: WORKSPACE_INCLUDE,
@@ -40,8 +41,9 @@ export async function GET(
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { slug: string } }
+  { params: rawParams }: { params: Promise<{ slug: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json();
   const workspace = await prisma.workspace.findFirst({
     where: { OR: [{ slug: params.slug }, { id: params.slug }] },

@@ -40,11 +40,11 @@ const SETTINGS_SECTIONS = [
 ] as const;
 
 export default function WorkspaceSettingsSectionPage({
-  params,
+  params: rawParams,
 }: {
-  params: { workspaceSlug: string; section: string };
+  params: Promise<{ workspaceSlug: string; section: string }>;
 }) {
-  const { workspaceSlug, section } = params;
+  const { workspaceSlug, section } = React.use(rawParams);
   const [workspace, setWorkspace] = useState<any>(null);
   const [wsName, setWsName] = useState("jack wolf's workspace");
   const [wsSlugInput, setWsSlugInput] = useState(workspaceSlug);

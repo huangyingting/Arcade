@@ -32,8 +32,8 @@ import {
   SFX_LIBRARY,
 } from '@/types/domain';
 
-export default function PromptVideoStudioPage({ params }: { params: { pid: string } }) {
-  const { pid } = params;
+export default function PromptVideoStudioPage({ params: rawParams }: { params: Promise<{ pid: string }> }) {
+  const { pid } = React.use(rawParams);
   const [video, setVideo] = useState<any>(null);
   const [inspectorTab, setInspectorTab] = useState<'chat' | 'design'>('chat');
 

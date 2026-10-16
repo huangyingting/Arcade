@@ -6,10 +6,11 @@ import Link from 'next/link';
 import { Sparkles, Lock, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 export default function ResetPasswordPage({
-  params,
+  params: rawParams,
 }: {
-  params: { token: string };
+  params: Promise<{ token: string }>;
 }) {
+  const params = React.use(rawParams);
   const router = useRouter();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');

@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { Zap, Check } from 'lucide-react';
 
-export default function UpgradePage({ params }: { params: { workspaceSlug: string } }) {
+export default function UpgradePage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const router = useRouter();
   const [upgrading, setUpgrading] = useState(false);
 

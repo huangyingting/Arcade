@@ -16,8 +16,8 @@ import {
   ArrowDown,
 } from 'lucide-react';
 
-export default function CollectionEditorPage({ params }: { params: { pid: string } }) {
-  const { pid } = params;
+export default function CollectionEditorPage({ params: rawParams }: { params: Promise<{ pid: string }> }) {
+  const { pid } = React.use(rawParams);
   const [collection, setCollection] = useState<any>(null);
   const [header, setHeader] = useState<any>({
     title: 'whoami.genisisiq.com — Doers, Not Talkers',

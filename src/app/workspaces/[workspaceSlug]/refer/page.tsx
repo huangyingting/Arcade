@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { Gift, Copy, Check, MailPlus, Sparkles } from 'lucide-react';
 
-export default function ReferPage({ params }: { params: { workspaceSlug: string } }) {
+export default function ReferPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const [copied, setCopied] = useState(false);
   const [email, setEmail] = useState('');
   const [referralUrl, setReferralUrl] = useState(

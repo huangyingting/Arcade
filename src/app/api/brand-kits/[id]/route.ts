@@ -4,8 +4,9 @@ import { crawlAndCaptureWebsite } from '@/lib/production-engine/live-crawler';
 
 export async function GET(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params: rawParams }: { params: Promise<{ id: string }> }
 ) {
+  const params = await rawParams;
   let brandKit = await prisma.brandKit.findUnique({
     where: { id: params.id },
   });
@@ -19,8 +20,9 @@ export async function GET(
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params: rawParams }: { params: Promise<{ id: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json();
   const existing = await prisma.brandKit.findUnique({ where: { id: params.id } });
   if (!existing) {

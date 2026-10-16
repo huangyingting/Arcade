@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { Eye, MousePointerClick, CheckCircle2, Globe, Plus, ExternalLink } from 'lucide-react';
 
-export default function TeamInsightsPage({ params }: { params: { workspaceSlug: string } }) {
+export default function TeamInsightsPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
+  const params = React.use(rawParams);
   const [tab, setTab] = useState<'activity' | 'arcades' | 'audience'>('activity');
   const [data, setData] = useState<any>({ events: [], flows: [], videos: [], leads: [] });
   const [recording, setRecording] = useState(false);

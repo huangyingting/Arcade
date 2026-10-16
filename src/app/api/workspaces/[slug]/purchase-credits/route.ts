@@ -3,8 +3,9 @@ import { prisma } from '@/lib/prisma';
 
 export async function POST(
   request: Request,
-  { params }: { params: { slug: string } }
+  { params: rawParams }: { params: Promise<{ slug: string }> }
 ) {
+  const params = await rawParams;
   const body = await request.json().catch(() => ({}));
   const creditsToAdd = Number(body.credits || 500);
 
