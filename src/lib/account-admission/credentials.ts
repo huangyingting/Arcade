@@ -19,21 +19,8 @@ export async function authenticatePassword(input: {
     include: { passwordCredential: true },
   });
 
-  if (!user) return null;
-
-  if (user.passwordCredential?.passwordHash) {
-    const valid = await verifyPassword(
-      input.password,
-      user.passwordCredential.passwordHash
-    );
-    if (!valid) return null;
-  } else {
-    // Verify against dummy hash for timing safety, or fallback to legacy passwordHash
-    await verifyPassword(input.password, DUMMY_PASSWORD_HASH);
-    if (user.passwordHash && user.passwordHash !== input.password) {
-      return null;
-    }
-  }
+  const valid = await verifyPassword(input.password, user?.passwordCredential?.passwordHash || DUMMY_PASSWORD_HASH);
+  if (!valid || !user?.passwordCredential || !user.emailVerified) return null;
 
   const session = await createDatabaseSession(user.id);
   return { user, session };
@@ -84,8 +71,8 @@ export async function resetPassword(input: {
   }
 
   if (!credential.resetExpiresAt || credential.resetExpiresAt <= now) {
-    await prisma.passwordCredential.update({
-      where: { id: credential.id },
+    await prisma.passwordCredential.updateMany({
+      where: { id: credential.id, resetTokenHash: tokenHash, resetExpiresAt: { lte: now } },
       data: { resetTokenHash: null, resetExpiresAt: null },
     });
     throw new AccountAdmissionError(
@@ -95,15 +82,17 @@ export async function resetPassword(input: {
     );
   }
 
-  await prisma.passwordCredential.update({
-    where: { id: credential.id },
-    data: {
-      passwordHash,
-      passwordChangedAt: now,
-      resetTokenHash: null,
-      resetExpiresAt: null,
-    },
+  await prisma.$transaction(async (tx) => {
+    const claimed = await tx.passwordCredential.updateMany({
+      where: { id: credential.id, resetTokenHash: tokenHash, resetExpiresAt: { gt: now } },
+      data: {
+        passwordHash, passwordChangedAt: now,
+        resetTokenHash: null, resetExpiresAt: null,
+      },
+    });
+    if (!claimed.count) throw new AccountAdmissionError(410, 'invalid_reset', 'This reset link has already been used.');
+    await tx.user.update({ where: { id: credential.userId }, data: { passwordHash: null } });
+    await tx.session.deleteMany({ where: { userId: credential.userId } });
   });
-  await prisma.session.deleteMany({ where: { userId: credential.userId } });
   return { userId: credential.userId };
 }

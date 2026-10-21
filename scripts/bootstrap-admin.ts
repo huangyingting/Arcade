@@ -1,3 +1,4 @@
+import './environment';
 import { readFileSync } from 'node:fs';
 import { bootstrapAdmin } from '../src/lib/account-admission/bootstrap';
 

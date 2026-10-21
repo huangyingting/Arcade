@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Arcade — Product Demos, AI Launch Videos & Multi-Channel Visuals',
+  title: 'Arcade Studio — Product stories, considered.',
   description:
-    'Turn any product URL, recording, or screenshot into interactive demos, custom-code AI launch videos, and multi-channel visuals.',
+    'Compose interactive walkthroughs, launch films and campaign visuals in one private, invite-only workspace.',
 };
 
 export default function RootLayout({
@@ -14,7 +14,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-white text-slate-900 antialiased selection:bg-indigo-600 selection:text-white">
+      <body className="min-h-screen antialiased">
+        <a href="#main-content" className="sr-only z-50 rounded bg-white p-3 text-slate-900 focus:not-sr-only focus:fixed focus:left-3 focus:top-3">Skip to content</a>
         {children}
       </body>
     </html>

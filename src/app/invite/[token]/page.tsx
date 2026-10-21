@@ -1,260 +1,67 @@
 'use client';
 
-import React, { FormEvent, useEffect, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import {
-  Sparkles,
-  UserPlus,
-  CheckCircle2,
-  AlertTriangle,
-  Loader2,
-  ArrowLeft,
-} from 'lucide-react';
 
-type InvitationView = {
-  id: string;
-  status: 'pending' | 'accepted' | 'revoked' | 'expired' | 'invalid';
-  maskedEmail: string | null;
-  email?: string;
-  expiresAt: string | null;
-};
+type Invitation = { status: string; maskedEmail?: string; email?: string; expiresAt?: string };
 
-export default function InvitationPage({
-  params: rawParams,
-}: {
-  params: Promise<{ token: string }>;
-}) {
-  const { token } = React.use(rawParams);
+export default function InvitationPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = use(params);
   const router = useRouter();
-  const [invitation, setInvitation] = useState<InvitationView | null>(null);
+  const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
-
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-
+  const [confirmation, setConfirmation] = useState('');
   useEffect(() => {
     let active = true;
-    fetch('/api/auth/invitation', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (!active) return;
-        setInvitation(data.invitation);
-        if (data.invitation?.email) {
-          setEmail(data.invitation.email);
-        }
-      })
-      .catch(() => {
-        if (active) setError('The invitation could not be checked.');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
+    async function load() {
+      try {
+        const response = await fetch('/api/auth/invitation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'This invitation could not be verified.');
+        if (active) { setInvitation(data.invitation); setEmail(data.invitation?.email || ''); }
+      } catch (error) { if (active) setError(error instanceof Error ? error.message : 'Unable to check this invitation.'); }
+      finally { if (active) setLoading(false); }
+    }
+    void load();
+    return () => { active = false; };
   }, [token]);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError('');
-    if (password !== confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-    if (password.length < 12) {
-      setError('Password must be at least 12 characters.');
-      return;
-    }
-
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setError('');
+    if (password !== confirmation) { setError('Passwords do not match.'); return; }
     setPending(true);
     try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token,
-          name,
-          email,
-          password,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'The invitation could not be accepted.');
-        return;
-      }
-      router.push(data.redirectUrl || '/welcome');
-      router.refresh();
-    } catch (err: any) {
-      setError(err?.message || 'The invitation could not be accepted.');
-    } finally {
-      setPending(false);
-    }
+      const response = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, name, email, password }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to accept this invitation.');
+      router.replace(data.redirectUrl || '/welcome'); router.refresh();
+    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to create your account.'); }
+    finally { setPending(false); }
   }
-
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
-        <Link href="/" className="flex items-center gap-2 font-bold text-slate-900 text-lg">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white">
-            <Sparkles className="h-4 w-4" />
-          </div>
-          <span>Arcade</span>
-        </Link>
-
-        <h1 className="mt-6 text-2xl font-bold text-slate-900">Accept your invitation</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Create your password to finish joining Arcade.
-        </p>
-
-        {loading ? (
-          <div className="mt-8 flex items-center justify-center gap-2 py-8 text-sm text-slate-500">
-            <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-            <span>Checking invitation…</span>
-          </div>
-        ) : invitation?.status !== 'pending' ? (
-          <div className="mt-6 space-y-4">
-            <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs font-medium text-rose-700">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                {invitation?.status === 'accepted'
-                  ? 'This invitation has already been used.'
-                  : invitation?.status === 'revoked'
-                  ? 'This invitation was revoked by an administrator.'
-                  : invitation?.status === 'expired'
-                  ? 'This invitation has expired.'
-                  : 'This invitation is invalid or no longer active.'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <Link href="/signin" className="font-semibold text-indigo-600 hover:underline">
-                Go to Sign in →
-              </Link>
-              <Link href="/admin/invitations" className="text-slate-600 hover:underline">
-                Generate new invite in Admin Console
-              </Link>
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-medium text-emerald-800">
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-              <span>
-                This invitation is active for <strong>{invitation.maskedEmail}</strong>.
-              </span>
-            </div>
-
-            {error && (
-              <div
-                role="alert"
-                className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700"
-              >
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-600">
-                Full Name
-              </label>
-              <input
-                name="name"
-                type="text"
-                autoComplete="name"
-                maxLength={120}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Alex Rivera"
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-600">
-                Invited Email <span className="text-rose-500">*</span>
-              </label>
-              <input
-                name="email"
-                type="email"
-                autoComplete="email"
-                maxLength={320}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm"
-              />
-              <p className="mt-1 text-[11px] text-slate-500">
-                Enter the exact email address that received this invitation.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-600">
-                Password <span className="text-rose-500">*</span>
-              </label>
-              <input
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                minLength={12}
-                maxLength={128}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                placeholder="At least 12 characters"
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-600">
-                Confirm Password <span className="text-rose-500">*</span>
-              </label>
-              <input
-                name="confirmPassword"
-                type="password"
-                autoComplete="new-password"
-                minLength={12}
-                maxLength={128}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                placeholder="Repeat password"
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={pending}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-60"
-            >
-              <UserPlus className="h-4 w-4" />
-              {pending ? 'Creating account...' : 'Accept invitation'}
-            </button>
-          </form>
-        )}
-
-        <div className="mt-6 text-center">
-          <Link
-            href="/signin"
-            className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-900"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Back to Sign in
-          </Link>
-        </div>
-      </div>
-    </main>
-  );
+  return <main className="auth-layout">
+    <section className="auth-story [&_.page-title]:text-white [&_.page-intro]:text-slate-300 [&_.eyebrow]:text-orange-300">
+      <Link href="/" className="text-2xl font-bold">Arcade.</Link>
+      <div className="py-16"><p className="eyebrow">01 / You’re invited</p><h1 className="page-title mt-5">Your next story<br />starts here.</h1><p className="page-intro mt-6">Create your account, then bring your product into focus.</p></div>
+    </section>
+    <section className="auth-card">
+      <h2 className="text-3xl font-semibold">Accept your invitation</h2>
+      {error && <p role="alert" className="status-error mt-5">{error}</p>}
+      {loading ? <p role="status" className="mt-6">Checking invitation…</p> : invitation?.status?.toLowerCase() === 'pending' ? <>
+        <p className="mt-4 text-sm text-slate-500">Invited as {invitation.maskedEmail || 'the email on this invitation'}. {invitation.expiresAt && `Expires ${new Date(invitation.expiresAt).toLocaleDateString()}.`}</p>
+        <form onSubmit={submit} className="mt-6 space-y-4">
+          <label htmlFor="name" className="field-label block">Name<input id="name" autoComplete="name" required maxLength={100} value={name} onChange={event => setName(event.target.value)} className="field mt-2 w-full" /></label>
+          <label htmlFor="email" className="field-label block">Invited email<input id="email" type="email" autoComplete="email" required maxLength={320} value={email} onChange={event => setEmail(event.target.value)} className="field mt-2 w-full" /></label>
+          <label htmlFor="password" className="field-label block">Password · at least 12 characters<input id="password" type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={password} onChange={event => setPassword(event.target.value)} className="field mt-2 w-full" /></label>
+          <label htmlFor="confirmation" className="field-label block">Confirm password<input id="confirmation" type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirmation} onChange={event => setConfirmation(event.target.value)} className="field mt-2 w-full" /></label>
+          <button className="btn-primary w-full" disabled={pending}>{pending ? 'Creating account…' : 'Create account →'}</button>
+        </form>
+      </> : <p className="empty-state mt-6">This invitation is {invitation?.status || 'unavailable'}. Ask your administrator for a new link.</p>}
+      <Link href="/auth" className="btn-quiet mt-5">Already a member? Sign in</Link>
+    </section>
+  </main>;
 }

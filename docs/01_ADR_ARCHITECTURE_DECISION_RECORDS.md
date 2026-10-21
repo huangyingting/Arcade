@@ -1,5 +1,7 @@
 # Architecture Decision Records (ADR) — Arcade Platform Clone
 
+> Historical research/proposed architecture, not an implementation-completion statement. Current decisions and deployment contracts: [Production operations](05_PRODUCTION_OPERATIONS.md).
+
 **Project**: Arcade Full-Stack Platform (`www.arcade.software` + `app.arcade.software`)  
 **Status**: Approved for Implementation  
 **Date**: 2026-10-15  
@@ -354,4 +356,3 @@ We implement the ReadWise `src/lib/account-admission/` subsystem and Prisma mode
 
 ### Consequences
 - **Positive**: Identical security posture and UX to `../ReadWise`, zero uninvited account creation in `invitation-only` mode, and full compatibility with both SQLite (`prisma/schema.prisma`) and PostgreSQL (`prisma/schema.postgres.prisma`).
-

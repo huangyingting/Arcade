@@ -1,28 +1,18 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { api, body, HttpError, throttle } from '@/lib/api';
+import { visualAccess } from '@/lib/assets';
 import { renderVisualCardExport } from '@/lib/production-engine/media-renderer';
+import { withWorkspaceStorage } from '@/lib/production-engine/storage';
+import type { VisualCanvasItem } from '@/types/domain';
 
-export async function POST(
-  request: Request,
-  { params: rawParams }: { params: Promise<{ pid: string }> }
-) {
-  const params = await rawParams;
-  const body = await request.json().catch(() => ({}));
-  const format = (body.format || 'png') as 'png' | 'mp4';
-  const visual = body.visual;
-
-  if (!visual) {
-    const project = await prisma.visualProject.findFirst({
-      where: { id: params.pid },
-    });
-    if (!project) {
-      return NextResponse.json({ error: 'Visual project not found' }, { status: 404 });
-    }
-    const visuals = JSON.parse(project.visualsJson || '[]');
-    const rendered = await renderVisualCardExport(visuals[0] || {}, format);
-    return NextResponse.json({ ok: true, ...rendered });
-  }
-
-  const rendered = await renderVisualCardExport(visual, format);
-  return NextResponse.json({ ok: true, ...rendered });
-}
+export const POST = api<{ params: Promise<{ pid: string }> }>(async (request, { params }) => {
+  const { asset, workspace, user } = await visualAccess((await params).pid, true);
+  await throttle(`render:${user.id}`, 10, 3600);
+  const input = await body(request);
+  if (!['png', 'mp4'].includes(String(input.format))) throw new HttpError(400, 'Choose PNG or MP4.');
+  const visuals: VisualCanvasItem[] = JSON.parse(asset.visualsJson);
+  const visual = visuals.find((v) => v.id === input.visualId);
+  if (!visual) throw new HttpError(404, 'Save and select a visual before exporting.');
+  const rendered = await withWorkspaceStorage(workspace.id, () => renderVisualCardExport(visual, input.format as 'png' | 'mp4'));
+  return NextResponse.json({ status: 'READY', ...rendered });
+});

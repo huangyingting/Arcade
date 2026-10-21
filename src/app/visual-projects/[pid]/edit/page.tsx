@@ -1,549 +1,75 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
-import {
-  ArrowLeft,
-  Save,
-  Check,
-  Download,
-  Sparkles,
-  Layers,
-  Image as ImageIcon,
-  Film,
-  Maximize2,
-  Palette,
-  Wand2,
-} from 'lucide-react';
-import { VISUAL_SIZE_PRESETS, VISUAL_TEMPLATES } from '@/types/domain';
+import { use, useEffect, useState } from 'react';
+import { Download, Image as ImageIcon, Upload, Sparkles, Globe, Loader2, Trash2, Plus } from 'lucide-react';
+import { requestJson, errorMessage } from '@/lib/client';
+import { blankVisual } from '@/lib/content';
+import { StudioHeader } from '@/components/studio/StudioHeader';
+import { VisualPreview } from '@/components/studio/VisualPreview';
+import { VISUAL_SIZE_PRESETS, TRANSLATION_LOCALES, type VisualCanvasItem } from '@/types/domain';
 
-export default function VisualProjectEditorPage({ params: rawParams }: { params: Promise<{ pid: string }> }) {
-  const { pid } = React.use(rawParams);
-  const [project, setProject] = useState<any>(null);
-  const [visuals, setVisuals] = useState<any[]>([]);
-  const [activeVisualIdx, setActiveVisualIdx] = useState(0);
-  const [saving, setSaving] = useState(false);
-  const [savedToast, setSavedToast] = useState(false);
-  const [exportNotice, setExportNotice] = useState<string | null>(null);
-  const [averyBusy, setAveryBusy] = useState(false);
-
+type Project = { id: string; name: string; status: string; role: string; visualsJson: string; workspace: { slug: string } };
+export default function VisualEditor({ params }: { params: Promise<{ pid: string }> }) {
+  const { pid } = use(params);
+  const [project, setProject] = useState<Project | null>(null);
+  const [visuals, setVisuals] = useState<VisualCanvasItem[]>([]);
+  const [index, setIndex] = useState(0);
+  const [tab, setTab] = useState<'content' | 'style'>('content');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState('');
+  const [download, setDownload] = useState<{ url: string; size: string } | null>(null);
+  const [locale, setLocale] = useState('zh-CN');
+  const [dirty, setDirty] = useState(false);
+  const [format, setFormat] = useState<'png' | 'mp4'>('png');
+  const active = visuals[index] || null;
+  const canEdit = Boolean(project && project.role !== 'VIEWER');
+  useEffect(() => { requestJson<{ project: Project }>(`/api/visual-projects/${pid}`).then(({ project }) => { setProject(project); setVisuals(JSON.parse(project.visualsJson)); }).catch((e) => setError(errorMessage(e))); }, [pid]);
   useEffect(() => {
-    async function load() {
-      const res = await fetch(`/api/visual-projects/${pid}`);
-      const data = await res.json();
-      const vp = data.project || data.visualProject;
-      if (vp) {
-        setProject(vp);
-        const parsed = JSON.parse(vp.visualsJson || '[]');
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setVisuals(parsed);
-        } else {
-          setVisuals([
-            {
-              id: 'vis_ig_sq',
-              presetId: 'ig-post-sq',
-              platform: 'Instagram',
-              presetName: 'Instagram post square',
-              width: 1080,
-              height: 1080,
-              templateId: 'capture',
-              isAnimated: true,
-              showLogo: true,
-              backgroundType: 'image',
-              backgroundImageUrl: 'linear-gradient(135deg, #111111 0%, #1E293B 60%, #D4AF37 100%)',
-              backgroundColor: '#111111',
-              headline: '2,300+ AI use cases indexed. Verify SC‑100 ↗',
-              subheadline:
-                'Build AI-enabled cloud solutions backed by 120+ verified badges and 2,300+ indexed use cases.',
-              headlineColor: '#F4EFE6',
-              ctaLabel: 'Explore AI ↗',
-              ctaBgColor: '#D4AF37',
-              ctaTextColor: '#111111',
-              showShadows: true,
-              screenshotUrl: '/media/scene1.png',
-            },
-          ]);
-        }
-      }
-    }
-    load();
-  }, [pid]);
-
-  const activeVisual = visuals[activeVisualIdx] || visuals[0] || {};
-  const activePreset =
-    VISUAL_SIZE_PRESETS.find((p) => p.id === activeVisual.presetId) || VISUAL_SIZE_PRESETS[0];
-
-  function updateActiveVisual(patch: Record<string, any>) {
-    setVisuals((prev) => prev.map((v, i) => (i === activeVisualIdx ? { ...v, ...patch } : v)));
+    const listener = (e: BeforeUnloadEvent) => { if (dirty) e.preventDefault(); };
+    window.addEventListener('beforeunload', listener); return () => window.removeEventListener('beforeunload', listener);
+  }, [dirty]);
+  function update(patch: Partial<VisualCanvasItem>) { setVisuals((prev) => prev.map((v, i) => i === index ? { ...v, ...patch } : v)); setDirty(true); setDownload(null); }
+  async function run(label: string, task: () => Promise<void>) {
+    setBusy(label); setError(''); setNotice('');
+    try { await task(); } catch (e) { setError(errorMessage(e)); } finally { setBusy(''); }
   }
-
-  function selectOrCreatePreset(preset: (typeof VISUAL_SIZE_PRESETS)[number]) {
-    const existingIdx = visuals.findIndex((v) => v.presetId === preset.id);
-    if (existingIdx !== -1) {
-      setActiveVisualIdx(existingIdx);
-      return;
-    }
-    const base = activeVisual || {};
-    const newCard = {
-      ...base,
-      id: `vis_${preset.id}_${Date.now()}`,
-      presetId: preset.id,
-      platform: preset.platform,
-      presetName: preset.name,
-      width: preset.width,
-      height: preset.height,
-    };
-    const next = [...visuals, newCard];
-    setVisuals(next);
-    setActiveVisualIdx(next.length - 1);
+  async function save() {
+    const data = await requestJson<{ project: Project }>(`/api/visual-projects/${pid}`, { method: 'PATCH', body: JSON.stringify({ name: project?.name, visuals }) });
+    setProject((old) => ({ ...old, ...data.project })); setDirty(false); setNotice('Your canvases are saved.');
   }
-
-  async function handleSave(nextVisuals = visuals) {
-    setSaving(true);
-    setSavedToast(false);
-    try {
-      await fetch(`/api/visual-projects/${project?.id || pid}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: project?.name,
-          visuals: nextVisuals,
-        }),
-      });
-      setSavedToast(true);
-      setTimeout(() => setSavedToast(false), 2500);
-    } finally {
-      setSaving(false);
-    }
+  function selectPreset(preset: typeof VISUAL_SIZE_PRESETS[number]) {
+    const found = visuals.findIndex((v) => v.presetId === preset.id);
+    if (found >= 0) { setIndex(found); return; }
+    const next = { ...(active || blankVisual()), id: crypto.randomUUID(), presetId: preset.id, platform: preset.platform, presetName: preset.name, width: preset.width, height: preset.height };
+    setVisuals([...visuals, next]); setIndex(visuals.length); setDirty(true); setDownload(null);
   }
-
-  async function triggerAveryAction(action: 'headline' | 'background' | 'translate', locale?: string) {
-    setAveryBusy(true);
-    try {
-      const res = await fetch(`/api/visual-projects/${project?.id || pid}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          averyAction: action,
-          visualId: activeVisual.id,
-          locale,
-        }),
-      });
-      const data = await res.json();
-      if (data.project) {
-        setProject(data.project);
-        setVisuals(JSON.parse(data.project.visualsJson || '[]'));
-      }
-    } finally {
-      setAveryBusy(false);
-    }
-  }
-
-  const [exportingAsset, setExportingAsset] = useState(false);
-  const [exportedAssetUrl, setExportedAssetUrl] = useState<string | null>(null);
-
-  async function handleExportVisualAsset() {
-    setExportingAsset(true);
-    try {
-      await handleSave();
-      const format = activeVisual.isAnimated ? 'mp4' : 'png';
-      const res = await fetch(`/api/visual-projects/${project?.id || pid}/export`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ format, visual: activeVisual }),
-      });
-      const data = await res.json();
-      const url = data.fileUrl || (activeVisual.isAnimated ? '/media/whoami-launch.mp4' : '/media/visual_preview.png');
-      setExportedAssetUrl(url);
-      setExportNotice(
-        `Rendered ${activeVisual.presetName || activePreset.name} (${activeVisual.width || activePreset.width}×${
-          activeVisual.height || activePreset.height
-        }) as ${format.toUpperCase()} (${data.fileSize || '1.4 MB'})`
-      );
-    } finally {
-      setExportingAsset(false);
-    }
-  }
-
-  async function handleUploadVisualScreenshot(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await fetch('/api/uploads', { method: 'POST', body: formData });
-    const data = await res.json();
-    if (data.url) {
-      updateActiveVisual({ screenshotUrl: data.url });
-    }
-    e.target.value = '';
-  }
-
-  const groupedPresets = VISUAL_SIZE_PRESETS.reduce<
-    Record<string, Array<(typeof VISUAL_SIZE_PRESETS)[number]>>
-  >((acc, preset) => {
-    if (!acc[preset.platform]) acc[preset.platform] = [];
-    acc[preset.platform].push(preset);
-    return acc;
-  }, {});
-
-  return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
-      {/* Header */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900 px-4">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/workspaces/workspace-5p8xcsfv"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Workspace
-          </Link>
-          <input
-            type="text"
-            value={project?.name || 'whoami.genisisiq.com Social & Launch Visuals'}
-            onChange={(e) => setProject({ ...project, name: e.target.value })}
-            className="rounded bg-transparent px-2 py-1 text-sm font-bold text-white focus:bg-slate-800 focus:outline-none"
-          />
-          <span className="rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[11px] font-semibold text-amber-300">
-            AI Visuals Studio • {visuals.length} Active Canvases • {activeVisual.width || activePreset.width}×
-            {activeVisual.height || activePreset.height}px
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {savedToast && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-semibold text-emerald-300">
-              <Check className="h-3.5 w-3.5" />
-              Saved
-            </span>
-          )}
-          <select
-            aria-label="Translate Visual Card Language"
-            disabled={averyBusy}
-            defaultValue="en"
-            onChange={(e) => triggerAveryAction('translate', e.target.value)}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-amber-300 focus:outline-none"
-          >
-            <option value="English (US)">🇺🇸 English (EN)</option>
-            <option value="Chinese Simplified (简体中文)">🇨🇳 简体中文 (ZH)</option>
-            <option value="Japanese (日本語)">🇯🇵 日本語 (JA)</option>
-            <option value="Korean (한국어)">🇰🇷 한국어 (KO)</option>
-            <option value="Spanish (Español)">🇪🇸 Español (ES)</option>
-          </select>
-          <button
-            onClick={() => triggerAveryAction('headline')}
-            disabled={averyBusy}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
-          >
-            <Wand2 className="h-3.5 w-3.5" />
-            Avery: Rewrite Copy
-          </button>
-          <button
-            onClick={() => triggerAveryAction('background')}
-            disabled={averyBusy}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20"
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            Avery: Restyle Background
-          </button>
-          <button
-            onClick={handleExportVisualAsset}
-            disabled={exportingAsset}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
-          >
-            <Download className="h-3.5 w-3.5 text-amber-400" />
-            {exportingAsset ? 'Rendering...' : `Export ${activeVisual.isAnimated ? 'MP4' : 'PNG'}`}
-          </button>
-          <button
-            onClick={() => handleSave()}
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#D4AF37] px-3.5 py-1.5 text-xs font-bold text-slate-950 hover:bg-amber-400"
-          >
-            <Save className="h-3.5 w-3.5" />
-            {saving ? 'Saving...' : 'Save Visual'}
-          </button>
-        </div>
-      </header>
-
-      {exportNotice && (
-        <div className="flex items-center justify-between border-b border-emerald-500/30 bg-emerald-950/70 px-6 py-2 text-xs text-emerald-200">
-          <span>✓ {exportNotice}</span>
-          <a
-            href={exportedAssetUrl || (activeVisual.isAnimated ? '/media/whoami-launch.mp4' : '/media/visual_preview.png')}
-            download
-            className="rounded bg-emerald-500 px-2.5 py-1 font-bold text-slate-950"
-          >
-            Download Asset
-          </a>
-        </div>
-      )}
-
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar: 28 Multi-Channel Size Presets */}
-        <aside className="w-72 shrink-0 overflow-y-auto border-r border-slate-800 bg-slate-900 p-4">
-          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-400">
-            <Maximize2 className="h-3.5 w-3.5" />
-            28 Channel Size Presets
-          </div>
-          <div className="mt-3 space-y-4">
-            {Object.entries(groupedPresets).map(([platform, list]) => (
-              <div key={platform}>
-                <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  {platform} ({list.length})
-                </div>
-                <div className="space-y-1">
-                  {list.map((p) => {
-                    const active = activeVisual.presetId === p.id;
-                    const inProject = visuals.some((v) => v.presetId === p.id);
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => selectOrCreatePreset(p)}
-                        className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition ${
-                          active
-                            ? 'bg-[#D4AF37] font-bold text-slate-950'
-                            : inProject
-                            ? 'border border-amber-500/40 bg-slate-800 text-amber-200'
-                            : 'text-slate-300 hover:bg-slate-800'
-                        }`}
-                      >
-                        <span className="truncate">{p.name}</span>
-                        <span className="ml-2 shrink-0 font-mono text-[10px] opacity-75">
-                          {p.width}×{p.height}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </aside>
-
-        {/* Center Visual Canvas Stage */}
-        <main className="flex flex-1 flex-col items-center justify-center overflow-auto bg-[#090A0F] p-8">
-          {/* Active Multi-Canvas Switcher Pills */}
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            {visuals.map((v, idx) => (
-              <button
-                key={v.id || idx}
-                onClick={() => setActiveVisualIdx(idx)}
-                className={`rounded-full px-3 py-1 text-xs font-bold transition ${
-                  idx === activeVisualIdx
-                    ? 'bg-[#D4AF37] text-slate-950'
-                    : 'border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                {v.platform}: {v.presetName} ({v.width}×{v.height})
-              </button>
-            ))}
-          </div>
-
-          <div
-            className="relative flex w-full max-w-3xl flex-col justify-between overflow-hidden rounded-2xl border border-slate-700 p-8 shadow-2xl transition-all"
-            style={{
-              background:
-                activeVisual.backgroundImageUrl ||
-                'linear-gradient(135deg, #111111 0%, #1E293B 60%, #D4AF37 100%)',
-              aspectRatio: `${activeVisual.width || activePreset.width} / ${
-                activeVisual.height || activePreset.height
-              }`,
-              maxHeight: '72vh',
-            }}
-          >
-            {/* Top Brand Pill */}
-            <div className="flex items-center justify-between">
-              <span
-                className="rounded-full px-3 py-1 text-xs font-extrabold uppercase tracking-wider"
-                style={{
-                  backgroundColor: activeVisual.ctaBgColor || '#D4AF37',
-                  color: activeVisual.ctaTextColor || '#111111',
-                }}
-              >
-                {activeVisual.ctaLabel || 'whoami.genisisiq.com • Verified Architecture'}
-              </span>
-              <span className="rounded bg-black/50 px-2.5 py-1 font-mono text-[11px] text-slate-200 backdrop-blur">
-                {activeVisual.platform || activePreset.platform} • {activeVisual.width || activePreset.width}×
-                {activeVisual.height || activePreset.height}
-              </span>
-            </div>
-
-            {/* Headline & Subheadline */}
-            <div className="my-4 max-w-xl">
-              <h2
-                className="text-2xl font-black leading-tight sm:text-3xl"
-                style={{ color: activeVisual.headlineColor || '#F4EFE6' }}
-              >
-                {activeVisual.headline}
-              </h2>
-              <p className="mt-1.5 text-xs text-slate-200 sm:text-sm">{activeVisual.subheadline}</p>
-            </div>
-
-            {/* Framed Screenshot Asset */}
-            <div
-              className={`overflow-hidden border border-white/20 bg-slate-950 shadow-2xl ${
-                activeVisual.isAnimated ? 'animate-pulse' : ''
-              } rounded-xl`}
-            >
-              <div className="flex items-center gap-1.5 border-b border-slate-800 bg-slate-900 px-3 py-1.5">
-                <span className="h-2 w-2 rounded-full bg-rose-500" />
-                <span className="h-2 w-2 rounded-full bg-amber-400" />
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                <span className="ml-2 font-mono text-[10px] text-slate-400">
-                  https://whoami.genisisiq.com
-                </span>
-              </div>
-              <img
-                src={activeVisual.screenshotUrl || '/media/scene1.png'}
-                alt={activeVisual.headline}
-                className="max-h-64 w-full object-cover"
-              />
-            </div>
-          </div>
-        </main>
-
-        {/* Right Inspector: Templates, Copy, Background, Frame & Output Mode */}
-        <aside className="w-80 shrink-0 space-y-5 overflow-y-auto border-l border-slate-800 bg-slate-900 p-4">
-          {/* 5 Layout Templates */}
-          <div>
-            <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-400">
-              <Layers className="h-3.5 w-3.5" />5 Layout Templates
-            </label>
-            <div className="mt-2 grid grid-cols-1 gap-1.5">
-              {VISUAL_TEMPLATES.map((tpl) => (
-                <button
-                  key={tpl.id}
-                  onClick={() => updateActiveVisual({ templateId: tpl.id })}
-                  className={`rounded-lg border px-3 py-2 text-left text-xs transition ${
-                    activeVisual.templateId === tpl.id
-                      ? 'border-amber-400 bg-amber-500/20 text-white'
-                      : 'border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="font-bold">{tpl.name}</div>
-                  <div className="text-[11px] text-slate-400">{tpl.description}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Copy Controls */}
-          <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950 p-3.5">
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-400">CTA / Badge Pill</label>
-              <input
-                type="text"
-                value={activeVisual.ctaLabel || ''}
-                onChange={(e) => updateActiveVisual({ ctaLabel: e.target.value })}
-                className="mt-1 w-full rounded border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-400">Headline</label>
-              <input
-                type="text"
-                value={activeVisual.headline || ''}
-                onChange={(e) => updateActiveVisual({ headline: e.target.value })}
-                className="mt-1 w-full rounded border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs font-bold text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-400">Subheadline</label>
-              <textarea
-                rows={2}
-                value={activeVisual.subheadline || ''}
-                onChange={(e) => updateActiveVisual({ subheadline: e.target.value })}
-                className="mt-1 w-full rounded border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-white"
-              />
-            </div>
-          </div>
-
-          {/* Screenshot Selector */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">
-              Screenshot Source
-            </label>
-            <select
-              value={activeVisual.screenshotUrl || '/media/scene1.png'}
-              onChange={(e) => updateActiveVisual({ screenshotUrl: e.target.value })}
-              className="mt-1.5 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white"
-            >
-              <option value="/media/scene1.png">Hero & Bauhaus Palette</option>
-              <option value="/media/scene2.png">120+ Verified AI & Cloud Badges</option>
-              <option value="/media/scene3.png">2,300+ AI Use Cases Explorer</option>
-              <option value="/media/scene4.png">Core Architecture Pillars</option>
-              <option value="/media/scene5.png">Bauhaus Manifesto Quote</option>
-              <option value="/media/scene6.png">Verify Credentials CTA</option>
-              {activeVisual.screenshotUrl &&
-                !activeVisual.screenshotUrl.startsWith('/media/scene') && (
-                  <option value={activeVisual.screenshotUrl}>
-                    Custom / Crawled ({activeVisual.screenshotUrl})
-                  </option>
-                )}
-            </select>
-            <label className="mt-2 flex cursor-pointer items-center justify-center rounded-lg border border-slate-700 bg-slate-950 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-slate-800">
-              📤 Upload Custom Image File
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleUploadVisualScreenshot}
-                className="hidden"
-              />
-            </label>
-          </div>
-
-          {/* Bauhaus Background Presets */}
-          <div>
-            <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
-              <Palette className="h-3.5 w-3.5 text-amber-400" />
-              Bauhaus Gradients
-            </label>
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {[
-                'linear-gradient(135deg, #111111 0%, #1E293B 60%, #D4AF37 100%)',
-                'linear-gradient(135deg, #111111 0%, #C42B1C 50%, #D4AF37 100%)',
-                'linear-gradient(135deg, #0047AB 0%, #111111 100%)',
-              ].map((g, i) => (
-                <button
-                  key={i}
-                  onClick={() => updateActiveVisual({ backgroundImageUrl: g })}
-                  className="h-10 rounded-lg border border-slate-700"
-                  style={{ background: g }}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Output Mode: Static PNG vs Animated MP4 */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">
-              Output Format
-            </label>
-            <div className="mt-1.5 grid grid-cols-2 gap-2">
-              <button
-                onClick={() => updateActiveVisual({ isAnimated: false })}
-                className={`inline-flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-bold ${
-                  !activeVisual.isAnimated
-                    ? 'border-amber-400 bg-amber-500/20 text-amber-300'
-                    : 'border-slate-800 bg-slate-950 text-slate-400'
-                }`}
-              >
-                <ImageIcon className="h-3.5 w-3.5" /> Static PNG
-              </button>
-              <button
-                onClick={() => updateActiveVisual({ isAnimated: true })}
-                className={`inline-flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-bold ${
-                  activeVisual.isAnimated
-                    ? 'border-amber-400 bg-amber-500/20 text-amber-300'
-                    : 'border-slate-800 bg-slate-950 text-slate-400'
-                }`}
-              >
-                <Film className="h-3.5 w-3.5" /> Animated MP4
-              </button>
-            </div>
-          </div>
-        </aside>
-      </div>
-    </div>
-  );
+  return <div className="studio">
+    <StudioHeader kind="Campaign visuals / Studio" name={project?.name || ''} workspaceSlug={project?.workspace.slug} status={project?.status} canEdit={canEdit} busy={Boolean(busy)} onName={(name) => { if (project) setProject({ ...project, name }); setDirty(true); }} onSave={() => run('Saving', save)}>
+      {canEdit && <button className="btn-primary !min-h-10 !text-xs" disabled={Boolean(busy) || !active} onClick={() => run('Rendering your visual', async () => { await save(); const data = await requestJson<{ fileUrl: string; fileSize: string }>(`/api/visual-projects/${pid}/export`, { method: 'POST', body: JSON.stringify({ format, visualId: active?.id }) }); setDownload({ url: data.fileUrl, size: data.fileSize }); setNotice('Your export is ready to download.'); })}>{busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}Export {format.toUpperCase()}</button>}
+    </StudioHeader>
+    <div aria-live="polite" className={error || notice || busy ? 'border-b border-slate-800 px-5 py-3' : ''}>{error && <p role="alert" className="status-error">{error}</p>}{notice && <p className="text-xs text-emerald-300">{notice}</p>}{busy && <p className="mt-1 text-xs text-orange-200">{busy}…</p>}{download && <a className="mt-2 inline-flex items-center gap-2 text-xs text-orange-200" href={`${download.url}?download=1`}><Download size={13} />Download export · {download.size}</a>}</div>
+    <main id="main-content" className="studio-layout">
+      <aside className="studio-panel border-b lg:border-b-0 lg:border-r"><h2 className="studio-label">Canvas formats</h2><p className="text-[10px] leading-relaxed text-slate-500">Choose a size. Your current design is copied into the new canvas so you can adapt its layout.</p><div className="max-h-96 space-y-6 overflow-y-auto lg:max-h-none">{[...new Set(VISUAL_SIZE_PRESETS.map((p) => p.platform))].map((platform) => <div key={platform}><h3 className="mb-2 text-[11px] font-medium text-slate-300">{platform}</h3><div className="space-y-1">{VISUAL_SIZE_PRESETS.filter((p) => p.platform === platform).map((preset) => <button key={preset.id} className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-[10px] ${preset.id === active?.presetId ? 'border-indigo-400 bg-slate-800 text-orange-100' : 'border-transparent text-slate-400 hover:bg-slate-800'}`} onClick={() => canEdit ? selectPreset(preset) : setIndex(Math.max(0, visuals.findIndex((v) => v.presetId === preset.id)))}><span>{preset.name}</span><span className="ml-2 shrink-0 font-mono text-[8px] text-slate-500">{preset.width}×{preset.height}</span></button>)}</div></div>)}</div></aside>
+      <section className="flex min-w-0 flex-col"><div className="flex items-center justify-between border-b border-slate-800 px-5 py-4"><span className="studio-label">{active?.platform || 'Canvas'} / {active ? `${active.width} × ${active.height}` : 'No canvas'}</span><span className="text-[10px] text-slate-500">{dirty ? 'Unsaved changes' : 'Composition preview'}</span></div><div className="studio-canvas flex-1"><VisualPreview visual={active} /></div><div className="flex gap-2 overflow-x-auto border-t border-slate-800 px-5 py-4">{visuals.map((v, i) => <button key={v.id} onClick={() => { setIndex(i); setDownload(null); }} className={`whitespace-nowrap rounded-lg border px-4 py-2 text-[10px] ${i === index ? 'border-indigo-400 text-orange-100' : 'border-slate-700 text-slate-400'}`}>{v.platform} / {v.width}×{v.height}</button>)}</div></section>
+      <aside className="studio-panel border-t lg:border-l lg:border-t-0"><div className="flex gap-5 border-b border-slate-700 pb-4"><button className={`text-xs ${tab === 'content' ? 'text-orange-200' : 'text-slate-400'}`} onClick={() => setTab('content')}>Content</button><button className={`text-xs ${tab === 'style' ? 'text-orange-200' : 'text-slate-400'}`} onClick={() => setTab('style')}>Style & export</button></div>
+        <fieldset disabled={!canEdit || Boolean(busy)} className="space-y-5">
+          {active && tab === 'content' && <>
+            <label className="block"><span className="field-label">Headline</span><textarea className="field" rows={4} value={active.headline} onChange={(e) => update({ headline: e.target.value })} maxLength={300} /></label>
+            <label className="block"><span className="field-label">Supporting copy</span><textarea className="field" rows={3} value={active.subheadline} onChange={(e) => update({ subheadline: e.target.value })} maxLength={1000} /></label>
+            <label className="block"><span className="field-label">Call to action</span><input className="field" value={active.ctaLabel} onChange={(e) => update({ ctaLabel: e.target.value })} maxLength={100} placeholder="Optional" /></label>
+            <label className="btn-secondary w-full !text-xs"><Upload size={13} />Upload product image<input type="file" className="hidden" accept="image/png,image/jpeg,image/webp" onChange={(e) => { const file = e.target.files?.[0]; if (file && project) run('Uploading image', async () => { const form = new FormData(); form.append('file', file); form.append('workspaceSlug', project.workspace.slug); const data = await requestJson<{ url: string }>('/api/uploads', { method: 'POST', body: form }); update({ screenshotUrl: data.url }); }); e.target.value = ''; }} /></label>
+            {active.screenshotUrl && <button className="text-[10px] text-slate-400" onClick={() => update({ screenshotUrl: '' })}>Remove product image</button>}
+            <div className="space-y-3 border-t border-slate-700 pt-5"><h3 className="studio-label">Refine with AI</h3><button className="btn-secondary w-full !text-xs" disabled={!active.headline} onClick={() => run('Refining copy', async () => { await save(); const data = await requestJson<{ project: Project }>(`/api/visual-projects/${pid}`, { method: 'PATCH', body: JSON.stringify({ averyAction: 'headline', visualId: active.id }) }); setVisuals(JSON.parse(data.project.visualsJson)); setNotice('Copy refined and saved.'); })}><Sparkles size={13} />Refine this copy</button><select aria-label="Translation language" value={locale} onChange={(e) => setLocale(e.target.value)} className="field">{TRANSLATION_LOCALES.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}</select><button className="btn-secondary w-full !text-xs" onClick={() => run('Translating copy', async () => { await save(); const data = await requestJson<{ project: Project }>(`/api/visual-projects/${pid}`, { method: 'PATCH', body: JSON.stringify({ averyAction: 'translate', visualId: active.id, locale }) }); setVisuals(JSON.parse(data.project.visualsJson)); setNotice('This canvas has been translated and saved.'); })}><Globe size={13} />Translate copy</button></div>
+          </>}
+          {active && tab === 'style' && <>
+            {([{ key: 'backgroundColor', label: 'Background' }, { key: 'headlineColor', label: 'Text' }, { key: 'ctaBgColor', label: 'Accent / CTA' }, { key: 'ctaTextColor', label: 'CTA text' }] as const).map(({ key, label }) => <label key={key} className="flex items-center justify-between text-xs text-slate-300">{label}<input aria-label={`${label} color`} type="color" value={active[key]} onChange={(e) => update({ [key]: e.target.value })} /></label>)}
+            <label className="block border-t border-slate-700 pt-5"><span className="field-label">Export format</span><select className="field" value={format} onChange={(e) => setFormat(e.target.value as typeof format)}><option value="png">PNG / Still image</option><option value="mp4">MP4 / Motion card</option></select></label>
+            <p className="text-[10px] leading-relaxed text-slate-500">Export uses the selected canvas’s actual pixel dimensions. MP4 creates a short motion card, not an AI-generated video.</p>
+            <button className="btn-secondary w-full !text-xs !text-red-300" onClick={() => { setVisuals(visuals.filter((_, i) => i !== index)); setIndex(Math.max(0, index - 1)); setDirty(true); }}><Trash2 size={13} />Remove canvas</button>
+          </>}
+        </fieldset>
+      </aside>
+    </main>
+  </div>;
 }

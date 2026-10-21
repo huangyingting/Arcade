@@ -1,346 +1,91 @@
 'use client';
 
-import React, { FormEvent, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  Copy,
-  MailPlus,
-  RefreshCw,
-  UserX,
-  CheckCircle2,
-  AlertTriangle,
-  Sparkles,
-  ArrowLeft,
-  ExternalLink,
-} from 'lucide-react';
 
 type Invitation = {
-  id: string;
-  email: string;
-  status: 'PENDING' | 'ACCEPTED' | 'REVOKED' | 'EXPIRED';
-  expiresAt: string;
-  acceptedAt: string | null;
-  revokedAt: string | null;
-  createdAt: string;
-  invitedBy?: { id: string; name: string | null; email?: string | null } | null;
-  acceptedBy?: { id: string; name: string | null; email?: string | null } | null;
+  id: string; email: string; status: string; expiresAt: string; createdAt: string;
+  acceptedAt?: string | null; revokedAt?: string | null;
+  invitedBy?: { name: string | null; email?: string | null } | null;
 };
-
 export default function AdminInvitationsPage() {
+  const [allowed, setAllowed] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [email, setEmail] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [pending, setPending] = useState(false);
-  const [rowPending, setRowPending] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [latestLink, setLatestLink] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [message, setMessage] = useState('');
+  const [confirm, setConfirm] = useState<{ id: string; action: 'rotate' | 'revoke' } | null>(null);
 
   async function loadInvitations() {
-    const res = await fetch('/api/admin/invitations');
-    const data = await res.json();
-    if (data.invitations) setInvitations(data.invitations);
+    const response = await fetch('/api/admin/invitations');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Unable to load invitations.');
+    setInvitations(data.invitations || []);
   }
-
   useEffect(() => {
-    loadInvitations();
+    let active = true;
+    void (async () => {
+      try {
+        const response = await fetch('/api/me');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Sign in with a platform administrator account.');
+        if (data.user?.role !== 'Admin') throw new Error('Only platform administrators can manage account invitations.');
+        if (!active) return;
+        setAllowed(true);
+        await loadInvitations();
+      } catch (error) { if (active) setError(error instanceof Error ? error.message : 'Unable to load invitations.'); }
+      finally { if (active) setLoading(false); }
+    })();
+    return () => { active = false; };
   }, []);
 
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault();
-    setPending(true);
-    setError('');
-    setLatestLink('');
+  async function create(event: React.FormEvent) {
+    event.preventDefault();
+    if (!allowed) return;
+    setPending(true); setError(''); setMessage(''); setLatestLink('');
     try {
-      const res = await fetch('/api/admin/invitations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
-        }),
+      const response = await fetch('/api/admin/invitations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}) }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'Could not create invitation.');
-        return;
-      }
-      setEmail('');
-      setExpiresAt('');
-      if (data.acceptUrl) {
-        setLatestLink(data.acceptUrl);
-        setCopied(false);
-      }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to create an invitation.');
+      setEmail(''); setExpiresAt('');
+      setLatestLink(data.acceptUrl || '');
+      setMessage('Invitation created. Deliver the one-time link securely to the recipient; this page does not send email.');
       await loadInvitations();
-    } finally {
-      setPending(false);
-    }
+    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to create an invitation.'); }
+    finally { setPending(false); }
   }
-
-  async function handleRotate(id: string) {
-    setRowPending(id);
-    setError('');
+  async function change() {
+    if (!allowed || !confirm) return;
+    const { id, action } = confirm;
+    setPending(true); setError(''); setMessage(''); setLatestLink('');
     try {
-      const res = await fetch(`/api/admin/invitations/${encodeURIComponent(id)}/rotate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'Could not rotate invitation.');
-        return;
-      }
-      if (data.acceptUrl) {
-        setLatestLink(data.acceptUrl);
-        setCopied(false);
-      }
+      const response = await fetch(`/api/admin/invitations/${encodeURIComponent(id)}${action === 'rotate' ? '/rotate' : ''}`, { method: action === 'rotate' ? 'POST' : 'DELETE' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `Unable to ${action} this invitation.`);
+      setLatestLink(data.acceptUrl || ''); setConfirm(null);
+      setMessage(action === 'rotate' ? 'A new one-time link was issued. The previous link is no longer valid.' : 'Invitation revoked.');
       await loadInvitations();
-    } finally {
-      setRowPending(null);
-    }
+    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to update the invitation.'); }
+    finally { setPending(false); }
   }
-
-  async function handleRevoke(id: string) {
-    setRowPending(id);
-    setError('');
-    try {
-      const res = await fetch(`/api/admin/invitations/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'Could not revoke invitation.');
-        return;
-      }
-      await loadInvitations();
-    } finally {
-      setRowPending(null);
-    }
+  async function copy() {
+    try { await navigator.clipboard.writeText(latestLink); setMessage('Invitation link copied. Share it privately with the intended recipient.'); }
+    catch { setError('Clipboard access failed. Select the link and copy it manually.'); }
   }
-
-  async function copyLink() {
-    if (!latestLink) return;
-    await navigator.clipboard.writeText(latestLink);
-    setCopied(true);
-  }
-
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <div className="flex items-center gap-4">
-            <Link
-              href="/workspaces/workspace-5p8xcsfv"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to Workspace
-            </Link>
-            <div className="h-4 w-px bg-slate-200" />
-            <div className="flex items-center gap-2 font-bold text-slate-900">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-white">
-                <Sparkles className="h-4 w-4" />
-              </div>
-              <span>Account Invitations (Invitation-Only Admission)</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 text-xs">
-            <Link
-              href="/admin/bootstrap"
-              className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 font-semibold text-indigo-700 hover:bg-indigo-100"
-            >
-              Bootstrap Admin
-            </Link>
-            <Link
-              href="/invite/demo-invite-token-2026"
-              className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 font-semibold text-amber-800 hover:bg-amber-100"
-            >
-              Test Seeded Invite (/invite/demo-invite-token-2026) <ExternalLink className="h-3.5 w-3.5" />
-            </Link>
-            <Link
-              href="/signin"
-              className="rounded-lg border border-slate-200 px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-100"
-            >
-              Sign in page
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl space-y-8 px-6 py-10">
-        {/* Create Invitation Card */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-bold text-slate-900">Create one-time invitation</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Send a one-time registration link. Invitations expire after 7 days unless you choose a custom expiry date.
-          </p>
-
-          {error && (
-            <div className="mt-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleCreate} className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-600">
-                Recipient Email <span className="text-rose-500">*</span>
-              </label>
-              <input
-                name="email"
-                type="email"
-                required
-                placeholder="architect@genisisiq.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-600">
-                Custom Expiry (Optional)
-              </label>
-              <input
-                name="expiresAt"
-                type="datetime-local"
-                value={expiresAt}
-                onChange={(e) => setExpiresAt(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm"
-              />
-            </div>
-
-            <div className="flex items-end">
-              <button
-                type="submit"
-                disabled={pending}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-              >
-                <MailPlus className="h-4 w-4" />
-                {pending ? 'Creating link...' : 'Create invitation'}
-              </button>
-            </div>
-          </form>
-
-          {latestLink && (
-            <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-900">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  One-time invitation link ready (shown only once):
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={copyLink}
-                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-800"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    {copied ? 'Copied!' : 'Copy link'}
-                  </button>
-                  <Link
-                    href={new URL(latestLink).pathname}
-                    className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-3 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
-                  >
-                    Open Invite Page ↗
-                  </Link>
-                </div>
-              </div>
-              <div className="mt-2 break-all rounded-lg border border-emerald-200 bg-white px-3 py-2 font-mono text-xs text-slate-800">
-                {latestLink}
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* Invitations Table */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Account Invitations Ledger</h2>
-              <p className="text-xs text-slate-500">
-                Rotate a pending invitation to generate a fresh one-time link or revoke it immediately.
-              </p>
-            </div>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-              {invitations.length} total
-            </span>
-          </div>
-
-          <div className="mt-5 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-xs font-semibold uppercase text-slate-500">
-                  <th className="pb-3 pr-4">Email</th>
-                  <th className="pb-3 pr-4">Status</th>
-                  <th className="pb-3 pr-4">Invited By</th>
-                  <th className="pb-3 pr-4">Expires</th>
-                  <th className="pb-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {invitations.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-slate-50/70">
-                    <td className="py-3.5 pr-4 font-medium text-slate-900">{inv.email}</td>
-                    <td className="py-3.5 pr-4">
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                          inv.status === 'PENDING'
-                            ? 'bg-amber-100 text-amber-800'
-                            : inv.status === 'ACCEPTED'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : inv.status === 'REVOKED'
-                            ? 'bg-rose-100 text-rose-800'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        {inv.status}
-                      </span>
-                    </td>
-                    <td className="py-3.5 pr-4 text-xs text-slate-600">
-                      {inv.invitedBy?.name || 'jack wolf'}
-                    </td>
-                    <td className="py-3.5 pr-4 text-xs text-slate-500">
-                      {new Date(inv.expiresAt).toLocaleDateString()}
-                    </td>
-                    <td className="py-3.5 text-right">
-                      {inv.status === 'PENDING' ? (
-                        <div className="inline-flex items-center gap-2">
-                          <button
-                            type="button"
-                            disabled={rowPending === inv.id}
-                            onClick={() => handleRotate(inv.id)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                          >
-                            <RefreshCw className="h-3 w-3" />
-                            Rotate link
-                          </button>
-                          <button
-                            type="button"
-                            disabled={rowPending === inv.id}
-                            onClick={() => handleRevoke(inv.id)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                          >
-                            <UserX className="h-3 w-3" />
-                            Revoke
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-slate-400">
-                          {inv.status === 'ACCEPTED' ? 'Claimed' : 'Closed'}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </main>
-    </div>
-  );
+  return <main className="page-wrap">
+    <header className="mb-10 flex flex-wrap items-end justify-between gap-5"><div><Link href="/" className="text-2xl font-bold tracking-tight">Arcade.</Link><p className="eyebrow mt-10">00 / Platform administration</p><h1 className="page-title mt-3">An intentional invitation.</h1><p className="page-intro mt-4">Create and manage one-time account access. Workspace administration alone does not grant this permission.</p></div><Link href="/workspaces" className="btn-secondary">Back to workspaces</Link></header>
+    {error && <p role="alert" className="status-error mb-5">{error}</p>}
+    {message && <p role="status" className="status-success mb-5">{message}</p>}
+    {loading ? <p role="status">Checking platform access…</p> : !allowed ? <section className="panel"><h2 className="panel-heading">Administrator access required</h2><p className="mt-4 text-sm text-slate-500">Initial platform administrators are provisioned by the deployment operator. There is no public administrator bootstrap page.</p><Link href="/auth" className="btn-primary mt-6">Sign in</Link></section> : <>
+      <section className="panel"><h2 className="panel-heading">Create account invitation</h2><form onSubmit={create} className="mt-6 grid items-end gap-5 md:grid-cols-[1fr_1fr_auto]"><label htmlFor="recipient" className="field-label">Recipient email<input id="recipient" type="email" autoComplete="off" required maxLength={320} value={email} onChange={event => setEmail(event.target.value)} disabled={pending} className="field mt-2 w-full" /></label><label htmlFor="expiry" className="field-label">Expiry · optional<input id="expiry" type="datetime-local" value={expiresAt} onChange={event => setExpiresAt(event.target.value)} disabled={pending} className="field mt-2 w-full" /></label><button className="btn-primary" disabled={pending}>{pending ? 'Working…' : 'Create invitation →'}</button></form><p className="mt-4 text-sm text-slate-500">Leave expiry blank to use the server’s default. An invitation grants account registration, not a workspace role.</p>{latestLink && <div className="mt-6 border-t border-slate-200 pt-6"><label htmlFor="invitation-link" className="field-label block">One-time invitation link<input id="invitation-link" readOnly value={latestLink} className="field mt-2 w-full font-mono text-xs" onFocus={event => event.target.select()} /></label><p className="mt-3 text-xs text-slate-500">Treat this link as a secret. It is shown only when issued.</p><button className="btn-secondary mt-4" type="button" onClick={() => void copy()}>Copy link</button><button className="btn-quiet mt-4 ml-3" onClick={() => setLatestLink('')}>Hide link</button></div>}</section>
+      <section className="panel mt-6"><div className="mb-6 flex items-center justify-between gap-4"><h2 className="panel-heading">Invitation history</h2><button className="btn-quiet" disabled={pending} onClick={async () => { setPending(true); setError(''); try { await loadInvitations(); } catch (error) { setError(error instanceof Error ? error.message : 'Unable to refresh invitations.'); } finally { setPending(false); } }}>Refresh</button></div>{!invitations.length ? <div className="empty-state"><h3 className="font-semibold">No account invitations yet.</h3><p className="mt-2 text-sm">Issue a link when you are ready to bring someone in.</p></div> : <div className="overflow-x-auto"><table className="data-table w-full text-left"><thead><tr><th>Recipient</th><th>Status</th><th>Expires</th><th>Actions</th></tr></thead><tbody>{invitations.map(invitation => <tr key={invitation.id}><td><p className="font-medium">{invitation.email}</p><p className="mt-1 text-xs text-slate-500">Created {new Date(invitation.createdAt).toLocaleDateString()}</p></td><td><span className="tag">{invitation.status}</span></td><td className="whitespace-nowrap">{new Date(invitation.expiresAt).toLocaleString()}</td><td>{confirm?.id === invitation.id ? <div className="flex flex-wrap items-center gap-2"><span className="text-sm">{confirm.action === 'rotate' ? 'Invalidate the old link?' : 'Revoke access from this link?'}</span><button className="btn-secondary" disabled={pending} onClick={() => void change()}>Confirm</button><button className="btn-quiet" disabled={pending} onClick={() => setConfirm(null)}>Cancel</button></div> : invitation.status.toUpperCase() !== 'ACCEPTED' && invitation.status.toUpperCase() !== 'REVOKED' ? <div className="flex flex-wrap gap-2"><button className="btn-quiet" disabled={pending} onClick={() => setConfirm({ id: invitation.id, action: 'rotate' })}>Replace link</button><button className="btn-quiet" disabled={pending} onClick={() => setConfirm({ id: invitation.id, action: 'revoke' })}>Revoke</button></div> : <span className="text-sm text-slate-500">No actions</span>}</td></tr>)}</tbody></table></div>}</section>
+    </>}
+  </main>;
 }

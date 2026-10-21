@@ -1,282 +1,50 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
-import {
-  ArrowLeft,
-  Save,
-  Check,
-  ExternalLink,
-  Plus,
-  Trash2,
-  FolderKanban,
-  Play,
-  Film,
-  ArrowUp,
-  ArrowDown,
-} from 'lucide-react';
+import { use, useEffect, useState } from 'react';
+import { Layers, Film, ArrowUp, ArrowDown, Trash2, Plus, ArrowUpRight, FolderOpen } from 'lucide-react';
+import { StudioHeader } from '@/components/studio/StudioHeader';
+import { requestJson, errorMessage } from '@/lib/client';
 
-export default function CollectionEditorPage({ params: rawParams }: { params: Promise<{ pid: string }> }) {
-  const { pid } = React.use(rawParams);
-  const [collection, setCollection] = useState<any>(null);
-  const [header, setHeader] = useState<any>({
-    title: 'whoami.genisisiq.com — Doers, Not Talkers',
-    subtitle: 'Interactive tour, 30s AI launch video, and 16s teaser film for Yi-Ting Huang.',
-    ctaLabel: 'Open Live Portfolio ↗',
-    ctaUrl: 'https://whoami.genisisiq.com',
-  });
-  const [items, setItems] = useState<any[]>([]);
-  const [flowsCatalog, setFlowsCatalog] = useState<any[]>([]);
-  const [videosCatalog, setVideosCatalog] = useState<any[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [savedToast, setSavedToast] = useState(false);
-
-  useEffect(() => {
-    async function load() {
-      const res = await fetch(`/api/collections/${pid}`);
-      const data = await res.json();
-      if (data.flows) setFlowsCatalog(data.flows);
-      if (data.videos) setVideosCatalog(data.videos);
-      if (data.collection) {
-        setCollection(data.collection);
-        setHeader((prev: any) => ({ ...prev, ...JSON.parse(data.collection.headerJson || '{}') }));
-        setItems(JSON.parse(data.collection.itemsJson || '[]'));
-      }
-    }
-    load();
-  }, [pid]);
-
-  function resolveItemMeta(item: any) {
-    const type = item.assetType || item.type || 'FLOW';
-    if (type === 'FLOW') {
-      const f = flowsCatalog.find((x) => x.id === item.assetId);
-      return {
-        type: 'FLOW',
-        title: item.title || f?.name || 'whoami.genisisiq.com Interactive Tour',
-        subtitle: f?.description || '5 Interactive Steps • Hotspots & AI Voiceover',
-        thumbnailUrl: f?.thumbnailUrl || '/media/scene1.png',
-        href: `/share/${f?.shareId || '319HqogqYEOZH11srxTM'}`,
-      };
-    } else {
-      const v = videosCatalog.find((x) => x.id === item.assetId);
-      return {
-        type: 'VIDEO',
-        title: item.title || v?.name || 'whoami.genisisiq.com Launch Video',
-        subtitle: `${v?.durationSec || 30}s Remotion Launch Video • 1080p MP4`,
-        thumbnailUrl: v?.thumbnailUrl || '/media/scene2.png',
-        href: `/share/videos/${v?.shareId || item.assetId || 'qGe4L499rr5AsLtm6F4q'}`,
-      };
-    }
-  }
-
-  async function handleSave() {
-    setSaving(true);
-    setSavedToast(false);
+type Collection = { id: string; name: string; status: string; role: string; shareId: string; headerJson: string; itemsJson: string; workspace: { slug: string } };
+type Item = { id: string; assetId: string; assetType: 'FLOW' | 'VIDEO'; order: number };
+type Header = { title: string; subtitle: string; ctaLabel: string; ctaUrl: string };
+type Catalog = { id: string; name: string; shareId: string; thumbnailUrl: string | null; description?: string };
+export default function CollectionEditor({ params }: { params: Promise<{ pid: string }> }) {
+  const { pid } = use(params);
+  const [collection, setCollection] = useState<Collection | null>(null);
+  const [header, setHeader] = useState<Header>({ title: '', subtitle: '', ctaLabel: '', ctaUrl: '' });
+  const [items, setItems] = useState<Item[]>([]);
+  const [flows, setFlows] = useState<Catalog[]>([]);
+  const [videos, setVideos] = useState<Catalog[]>([]);
+  const [selected, setSelected] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const canEdit = Boolean(collection && collection.role !== 'VIEWER');
+  useEffect(() => { requestJson<{ collection: Collection; flows: Catalog[]; videos: Catalog[] }>(`/api/collections/${pid}`).then((data) => { setCollection(data.collection); setHeader(JSON.parse(data.collection.headerJson)); setItems(JSON.parse(data.collection.itemsJson)); setFlows(data.flows); setVideos(data.videos); }).catch((e) => setError(errorMessage(e))); }, [pid]);
+  async function save(status?: string) {
+    setBusy(true); setError(''); setNotice('');
     try {
-      await fetch(`/api/collections/${collection?.id || pid}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: collection?.name,
-          header,
-          items,
-        }),
-      });
-      setSavedToast(true);
-      setTimeout(() => setSavedToast(false), 2500);
-    } finally {
-      setSaving(false);
-    }
+      const { collection: updated } = await requestJson<{ collection: Collection }>(`/api/collections/${pid}`, { method: 'PATCH', body: JSON.stringify({ name: collection?.name, header, items, ...(status ? { status } : {}) }) });
+      setCollection((old) => ({ ...old, ...updated })); setNotice(status === 'PUBLISHED' ? 'Collection published. Only published items are visible to viewers.' : status === 'DRAFT' ? 'Collection unpublished.' : 'Collection saved.');
+    } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
   }
-
-  function moveItem(idx: number, dir: -1 | 1) {
-    const target = idx + dir;
-    if (target < 0 || target >= items.length) return;
-    const next = [...items];
-    const [removed] = next.splice(idx, 1);
-    next.splice(target, 0, removed);
-    setItems(next.map((it, i) => ({ ...it, order: i })));
+  function move(index: number, direction: -1 | 1) {
+    const next = [...items]; const target = index + direction;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    setItems(next.map((item, order) => ({ ...item, order })));
   }
-
-  return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900 px-6">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/workspaces/workspace-5p8xcsfv"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Workspace
-          </Link>
-          <FolderKanban className="h-4 w-4 text-amber-400" />
-          <input
-            type="text"
-            value={collection?.name || 'whoami.genisisiq.com Executive Launch Hub'}
-            onChange={(e) => setCollection({ ...collection, name: e.target.value })}
-            className="rounded bg-transparent px-2 py-1 text-sm font-bold text-white focus:bg-slate-800 focus:outline-none"
-          />
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          {savedToast && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-semibold text-emerald-300">
-              <Check className="h-3.5 w-3.5" />
-              Saved
-            </span>
-          )}
-          <Link
-            href={`/share/collections/${collection?.shareId || 'whoami-showcase'}`}
-            target="_blank"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700"
-          >
-            Open Public Showcase <ExternalLink className="h-3.5 w-3.5" />
-          </Link>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#D4AF37] px-4 py-1.5 text-xs font-bold text-slate-950 hover:bg-amber-400"
-          >
-            <Save className="h-3.5 w-3.5" />
-            {saving ? 'Saving...' : 'Save Collection'}
-          </button>
-        </div>
-      </header>
-
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Settings & Asset Adder */}
-        <aside className="w-80 shrink-0 space-y-5 overflow-y-auto border-r border-slate-800 bg-slate-900 p-5">
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">
-              Showcase Header Title
-            </label>
-            <input
-              type="text"
-              value={header.title || ''}
-              onChange={(e) => setHeader({ ...header, title: e.target.value })}
-              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">
-              Showcase Subtitle
-            </label>
-            <textarea
-              rows={3}
-              value={header.subtitle || ''}
-              onChange={(e) => setHeader({ ...header, subtitle: e.target.value })}
-              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-            />
-          </div>
-
-          <div className="space-y-2 border-t border-slate-800 pt-4">
-            <div className="text-xs font-bold uppercase tracking-wider text-amber-400">
-              Add Asset to Collection
-            </div>
-            <button
-              onClick={() =>
-                setItems([
-                  ...items,
-                  {
-                    id: `ci_${Date.now()}`,
-                    assetType: 'FLOW',
-                    assetId: '4fLyMFzH8BjqgKQF4Bd6',
-                    order: items.length,
-                  },
-                ])
-              }
-              className="flex w-full items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700"
-            >
-              <Plus className="h-3.5 w-3.5 text-amber-400" />
-              Add Interactive Demo Flow
-            </button>
-            <button
-              onClick={() =>
-                setItems([
-                  ...items,
-                  {
-                    id: `ci_${Date.now()}`,
-                    assetType: 'VIDEO',
-                    assetId: 'qGe4L499rr5AsLtm6F4q',
-                    order: items.length,
-                  },
-                ])
-              }
-              className="flex w-full items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700"
-            >
-              <Plus className="h-3.5 w-3.5 text-amber-400" />
-              Add 30s AI Launch Video
-            </button>
-          </div>
-        </aside>
-
-        {/* Main Collection Preview */}
-        <main className="flex-1 overflow-y-auto p-8">
-          <div className="mx-auto max-w-4xl rounded-2xl border border-slate-800 bg-slate-900 p-8">
-            <span className="rounded-full bg-amber-500/20 px-3 py-1 text-xs font-bold text-amber-300">
-              Multi-Asset Collection Hub ({items.length} Assets)
-            </span>
-            <h1 className="mt-3 text-3xl font-extrabold text-white">{header.title}</h1>
-            <p className="mt-2 text-sm text-slate-400">{header.subtitle}</p>
-
-            <div className="mt-8 grid gap-4 sm:grid-cols-2">
-              {items.map((item, idx) => {
-                const meta = resolveItemMeta(item);
-                return (
-                  <div
-                    key={item.id || idx}
-                    className="group relative overflow-hidden rounded-xl border border-slate-800 bg-slate-950"
-                  >
-                    <img
-                      src={meta.thumbnailUrl}
-                      alt={meta.title}
-                      className="h-40 w-full object-cover"
-                    />
-                    <div className="p-4">
-                      <div className="flex items-center justify-between">
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-amber-400">
-                          {meta.type === 'FLOW' ? (
-                            <Play className="h-3 w-3" />
-                          ) : (
-                            <Film className="h-3 w-3" />
-                          )}
-                          {meta.type}
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => moveItem(idx, -1)}
-                            className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-white"
-                            title="Move Up"
-                          >
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={() => moveItem(idx, 1)}
-                            className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-white"
-                            title="Move Down"
-                          >
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={() => setItems(items.filter((_, i) => i !== idx))}
-                            className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-rose-400"
-                            title="Remove"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="mt-1 text-sm font-bold text-white">{meta.title}</div>
-                      <div className="mt-0.5 text-xs text-slate-400">{meta.subtitle}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </main>
-      </div>
-    </div>
-  );
+  return <div className="studio">
+    <StudioHeader kind="Collection / Studio" name={collection?.name || ''} workspaceSlug={collection?.workspace.slug} status={collection?.status} canEdit={canEdit} busy={busy} onName={(name) => { if (collection) setCollection({ ...collection, name }); }} onSave={() => save()} onPublish={() => save(collection?.status === 'PUBLISHED' ? 'DRAFT' : 'PUBLISHED')} shareUrl={collection ? `/share/collections/${collection.shareId}` : undefined} />
+    {(error || notice) && <div aria-live="polite" className="border-b border-slate-800 px-5 py-3">{error && <p role="alert" className="status-error">{error}</p>}{notice && <p className="text-xs text-emerald-300">{notice}</p>}</div>}
+    <main id="main-content" className="grid flex-1 lg:grid-cols-[320px_1fr]">
+      <aside className="studio-panel border-r"><fieldset disabled={!canEdit || busy} className="space-y-5"><p className="studio-label">Collection identity</p><label className="block"><span className="field-label">Headline</span><input className="field" value={header.title} onChange={(e) => setHeader({ ...header, title: e.target.value })} maxLength={300} /></label><label className="block"><span className="field-label">Introduction</span><textarea rows={3} className="field" value={header.subtitle} onChange={(e) => setHeader({ ...header, subtitle: e.target.value })} maxLength={2000} /></label><label className="block"><span className="field-label">CTA label <span className="font-normal opacity-50">(optional)</span></span><input className="field" value={header.ctaLabel} onChange={(e) => setHeader({ ...header, ctaLabel: e.target.value })} maxLength={100} /></label><label className="block"><span className="field-label">CTA destination</span><input className="field" type="url" value={header.ctaUrl} onChange={(e) => setHeader({ ...header, ctaUrl: e.target.value })} placeholder="https://your-product.com" /></label>
+      <div className="space-y-3 border-t border-slate-700 pt-5"><h2 className="studio-label">Add published work</h2><select aria-label="Published asset" className="field !text-xs" value={selected} onChange={(e) => setSelected(e.target.value)}><option value="">Choose a published asset</option>{flows.map((f) => <option key={f.id} value={`FLOW:${f.id}`}>Demo / {f.name}</option>)}{videos.map((v) => <option key={v.id} value={`VIDEO:${v.id}`}>Video / {v.name}</option>)}</select><button className="btn-secondary w-full !text-xs" disabled={!selected} onClick={() => { const [assetType, assetId] = selected.split(':'); if (!items.some((i) => i.assetId === assetId)) setItems([...items, { id: crypto.randomUUID(), assetId, assetType: assetType as Item['assetType'], order: items.length }]); setSelected(''); }}><Plus size={13} />Add to collection</button><p className="text-[10px] leading-relaxed text-slate-500">Only published demos and videos from this workspace can be added. Publish them in their editors first.</p></div></fieldset></aside>
+      <section className="p-6 md:p-12"><p className="studio-label">Collection preview</p><div className="mt-6 overflow-hidden rounded-2xl bg-[#f5f4ec] text-slate-900"><div className="border-b border-slate-300 px-8 py-12 md:px-12"><p className="eyebrow">A curated perspective</p><h1 className="mt-4 text-3xl font-medium tracking-tight md:text-4xl">{header.title || 'Your collection title'}</h1>{header.subtitle && <p className="mt-4 max-w-lg text-sm leading-relaxed text-slate-500">{header.subtitle}</p>}{header.ctaUrl && header.ctaLabel && <span className="btn-primary mt-5">{header.ctaLabel}<ArrowUpRight size={15} /></span>}</div><div className="space-y-4 p-5 md:p-8">{!items.length && <div className="empty-state"><FolderOpen size={30} strokeWidth={1} /><p>Add published work to build this collection.</p></div>}{items.map((item, index) => {
+        const asset = (item.assetType === 'FLOW' ? flows : videos).find((a) => a.id === item.assetId);
+        return <div key={item.id} className="flex flex-wrap items-center gap-4 rounded-xl border border-slate-300 bg-[#fdfcf7] p-4">{asset?.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" className="h-20 w-32 rounded-lg object-cover" /> : <div className="grid h-20 w-32 place-items-center rounded-lg bg-slate-100">{item.assetType === 'FLOW' ? <Layers size={24} className="text-slate-400" /> : <Film size={24} className="text-slate-400" />}</div>}<div className="min-w-0 flex-1"><p className="eyebrow">{item.assetType === 'FLOW' ? 'Interactive demo' : 'Launch video'}</p><h2 className="mt-2 text-sm font-semibold">{asset?.name || 'Asset no longer published'}</h2></div>{canEdit && <div className="flex gap-1"><button aria-label="Move asset earlier" disabled={index === 0} onClick={() => move(index, -1)} className="rounded p-2 text-slate-500"><ArrowUp size={14} /></button><button aria-label="Move asset later" disabled={index === items.length - 1} onClick={() => move(index, 1)} className="rounded p-2 text-slate-500"><ArrowDown size={14} /></button><button aria-label="Remove from collection" onClick={() => setItems(items.filter((i) => i.id !== item.id))} className="rounded p-2 text-red-700"><Trash2 size={14} /></button></div>}</div>;
+      })}</div></div></section>
+    </main>
+  </div>;
 }

@@ -1,37 +1,6 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { api, HttpError, workspaceAccess } from '@/lib/api';
 
-export async function POST(
-  request: Request,
-  { params: rawParams }: { params: Promise<{ slug: string }> }
-) {
-  const params = await rawParams;
-  const body = await request.json().catch(() => ({}));
-  const creditsToAdd = Number(body.credits || 500);
-
-  const workspace = await prisma.workspace.findFirst({
-    where: { OR: [{ slug: params.slug }, { id: params.slug }] },
-  });
-  if (!workspace) {
-    return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
-  }
-
-  const updated = await prisma.workspace.update({
-    where: { id: workspace.id },
-    data: {
-      bonusCreditsBalance: workspace.bonusCreditsBalance + creditsToAdd,
-    },
-  });
-
-  await prisma.creditTransaction.create({
-    data: {
-      workspaceId: workspace.id,
-      actorEmail: 'wlfjck@gmail.com',
-      actionType: 'CREDIT_TOPUP',
-      creditsDelta: creditsToAdd,
-      description: `Purchased +${creditsToAdd} AI Credits Pack`,
-    },
-  });
-
-  return NextResponse.json({ ok: true, workspace: updated });
-}
+export const POST = api<{ params: Promise<{ slug: string }> }>(async (_request, { params }) => {
+  await workspaceAccess((await params).slug, true, true);
+  throw new HttpError(501, 'Payments are not configured. No charge or credit adjustment has been made.');
+});

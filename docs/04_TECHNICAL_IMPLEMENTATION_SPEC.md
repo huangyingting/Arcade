@@ -1,5 +1,7 @@
 # Technical Implementation Specification — Arcade Platform Clone
 
+> Original proposed contracts, not current runtime documentation. The implementation now uses Next.js 16, database sessions, private media, real Chromium/FFmpeg rendering and explicit provider failures; see [current operations](05_PRODUCTION_OPERATIONS.md).
+
 **Project**: Arcade Full-Stack Platform (`www.arcade.software` + `app.arcade.software`)  
 **Version**: 1.0  
 **Date**: 2026-10-15  

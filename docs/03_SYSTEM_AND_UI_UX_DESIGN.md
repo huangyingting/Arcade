@@ -1,5 +1,7 @@
 # System & UI/UX Design Document — Arcade Platform Clone
 
+> Historical reference design. The implemented editorial redesign uses Mona Sans, JetBrains Mono, a parchment canvas, deep olive navigation/studios and terracotta accents; see [current design](../README.md#design).
+
 **Project**: Arcade Full-Stack Platform (`www.arcade.software` + `app.arcade.software`)  
 **Version**: 1.0  
 **Date**: 2026-10-15  

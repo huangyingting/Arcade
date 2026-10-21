@@ -125,12 +125,12 @@ model User {
   id                  String    @id @default(cuid())
   email               String    @unique
   emailVerified       DateTime?
-  name                String    @default("jack wolf")
+  name                String    @default("")
   image               String?
-  role                String    @default("Admin") // "Admin" | "Creator" | "Viewer"
+  role                String    @default("Creator") // "Admin" | "Creator" | "Viewer"
   passwordHash        String?
-  onboardingRole      String?   @default("Product Engineering")
-  onboardingGoalsJson String    @default("[\"Interactive Demos\",\"AI Videos\",\"AI Visuals\"]")
+  onboardingRole      String?
+  onboardingGoalsJson String    @default("[]")
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -155,13 +155,13 @@ model Workspace {
   iconUrl                   String?
   planTier                  String   @default("FREE") // "FREE" | "PRO" | "GROWTH" | "ENTERPRISE"
   billingInterval           String   @default("annual") // "monthly" | "annual"
-  monthlyCreditsQuota       Int      @default(200)
-  bonusCreditsBalance       Int      @default(200)
-  usedCreditsThisCycle      Int      @default(100)
-  onboardingChecklistJson   String   @default("{\"brandKit\":true,\"video\":true,\"demo\":true,\"visuals\":true,\"share\":true,\"claimedBonus\":true}")
+  monthlyCreditsQuota       Int      @default(0)
+  bonusCreditsBalance       Int      @default(0)
+  usedCreditsThisCycle      Int      @default(0)
+  onboardingChecklistJson   String   @default("{}")
   privacySettingsJson       String   @default("{\"collectViewerAnalytics\":true,\"showCookieBanner\":false,\"anonymizeIp\":false,\"retentionDays\":365}")
   translationSettingsJson   String   @default("{\"defaultLocale\":\"en\",\"targetLocales\":[\"es\",\"fr\",\"de\",\"ja\",\"zh-CN\"],\"glossary\":[]}")
-  pronunciationRulesJson    String   @default("[{\"id\":\"pr1\",\"word\":\"SC-100\",\"replacement\":\"S C One Hundred\"},{\"id\":\"pr2\",\"word\":\"genisisiq\",\"replacement\":\"Genesis I Q\"}]")
+  pronunciationRulesJson    String   @default("[]")
   syntheticVoicesJson       String   @default("{\"defaultVoiceId\":\"ava-natural\",\"customVoices\":[]}")
   advancedSettingsJson      String   @default("{\"ssoEnabled\":false,\"samlEntryPoint\":\"\",\"scimEnabled\":false}")
   createdAt                 DateTime @default(now())
@@ -287,8 +287,8 @@ model Flow {
   createdById      String
   name             String   @default("Untitled Demo")
   description      String?
-  status           String   @default("PUBLISHED") // "DRAFT" | "PUBLISHED" | "ARCHIVED" | "DELETED"
-  visibility       String   @default("PUBLIC")    // "PUBLIC" | "LINK_ONLY" | "PRIVATE"
+  status           String   @default("DRAFT") // "DRAFT" | "PUBLISHED" | "ARCHIVED" | "DELETED"
+  visibility       String   @default("PRIVATE") // "PUBLIC" | "LINK_ONLY" | "PRIVATE"
   aspectRatio      String   @default("16:9")
   thumbnailUrl     String?
   stepsJson        String   @default("[]")
@@ -337,7 +337,7 @@ model PromptVideo {
   aspectRatio       String   @default("16:9")
   durationSec       Int      @default(30)
   fps               Int      @default(30)
-  status            String   @default("PUBLISHED")
+  status            String   @default("DRAFT")
   currentVersion    Int      @default(1)
   thumbnailUrl      String?
   scenesJson        String   @default("[]")
@@ -383,7 +383,7 @@ model VisualProject {
   category      String   @default("social_announcement")
   prompt        String
   sourceFlowId  String?
-  status        String   @default("PUBLISHED")
+  status        String   @default("DRAFT")
   thumbnailUrl  String?
   visualsJson   String   @default("[]")
   templatesJson String   @default("[]")
@@ -405,7 +405,7 @@ model Collection {
   workspaceId String
   createdById String
   name        String   @default("Untitled Collection")
-  status      String   @default("PUBLISHED")
+  status      String   @default("DRAFT")
   headerJson  String   @default("{}")
   itemsJson   String   @default("[]")
   viewsCount  Int      @default(0)
@@ -418,6 +418,7 @@ model Collection {
 
 model AnalyticsEvent {
   id            String   @id @default(cuid())
+  dedupeKey     String?  @unique
   workspaceId   String
   assetType     String
   assetId       String
@@ -426,14 +427,15 @@ model AnalyticsEvent {
   visitorEmail  String?
   companyName   String?
   companyDomain String?
-  country       String   @default("United States")
-  deviceType    String   @default("Desktop")
+  country       String   @default("")
+  deviceType    String   @default("")
   eventType     String
   stepIndex     Int?
   durationMs    Int      @default(0)
   createdAt     DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, createdAt])
 }
 
 model LeadCapture {
@@ -448,9 +450,11 @@ model LeadCapture {
   stepsCompleted Int      @default(1)
   totalSteps     Int      @default(1)
   syncedToCrm    Boolean  @default(false)
+  consentAt      DateTime?
   createdAt      DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, createdAt])
 }
 
 model CreditTransaction {
@@ -526,4 +530,12 @@ model InboxNotification {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model RequestLimit {
+  key      String   @id
+  count    Int      @default(0)
+  resetsAt DateTime
+
+  @@index([resetsAt])
 }

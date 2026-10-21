@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import { accountAdmissionMode, isValidAccountEmail, normalizeAccountEmail } from './policy';
+import { isValidAccountEmail, normalizeAccountEmail } from './policy';
 
 export function verifiedProviderEmail(
   provider: string,
@@ -70,6 +70,7 @@ export async function authorizeSocialSignIn(params: {
         session_state: params.sessionState,
       },
     });
+    if (!existingUser.emailVerified) await prisma.user.update({ where: { id: existingUser.id }, data: { emailVerified: now } });
     return true;
   }
 
@@ -84,6 +85,11 @@ export async function authorizeSocialSignIn(params: {
       verifiedEmail.split('@')[0];
 
     await prisma.$transaction(async (tx) => {
+      const claimed = await tx.accountInvitation.updateMany({
+        where: { id: invitation.id, activeForEmail: verifiedEmail, status: 'PENDING', expiresAt: { gt: now } },
+        data: { status: 'ACCEPTED', acceptedAt: now, activeForEmail: null, tokenHash: null },
+      });
+      if (!claimed.count) throw new Error('The account invitation is no longer active.');
       const user = await tx.user.create({
         data: {
           email: verifiedEmail,
@@ -110,8 +116,8 @@ export async function authorizeSocialSignIn(params: {
         },
       });
 
-      await tx.accountInvitation.updateMany({
-        where: { id: invitation.id, status: 'PENDING' },
+      await tx.accountInvitation.update({
+        where: { id: invitation.id },
         data: {
           status: 'ACCEPTED',
           acceptedById: user.id,
@@ -125,9 +131,5 @@ export async function authorizeSocialSignIn(params: {
     return true;
   }
 
-  if (accountAdmissionMode() === 'invitation-only') {
-    return '/auth?error=InvitationRequired';
-  }
-
-  return true;
+  return '/auth?error=InvitationRequired';
 }

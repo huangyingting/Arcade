@@ -1,103 +1,38 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { use, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
-import { Users, Download, Plus } from 'lucide-react';
 
-export default function LeadsPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
-  const params = React.use(rawParams);
-  const [leads, setLeads] = useState<any[]>([]);
-  const [email, setEmail] = useState('');
-  const [company, setCompany] = useState('');
-
-  async function loadLeads() {
-    const res = await fetch('/api/leads');
-    const data = await res.json();
-    setLeads(data.leads || []);
-  }
-
+type Lead = { id: string; email: string; fullName?: string; company?: string; flowTitle?: string; createdAt: string; stepsCompleted: number; totalSteps: number };
+export default function LeadsPage({ params }: { params: Promise<{ workspaceSlug: string }> }) {
+  const { workspaceSlug } = use(params);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
   useEffect(() => {
-    loadLeads();
-  }, []);
-
-  async function handleAddLead(e: React.FormEvent) {
-    e.preventDefault();
-    if (!email) return;
-    await fetch('/api/leads', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, company }),
-    });
-    setEmail('');
-    setCompany('');
-    loadLeads();
+    let active = true; setLoading(true); setError(''); setLeads([]);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/leads?workspaceSlug=${encodeURIComponent(workspaceSlug)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Unable to load captured leads.');
+        if (active) setLeads(data.leads || []);
+      } catch (error) { if (active) setError(error instanceof Error ? error.message : 'Unable to load leads.'); }
+      finally { if (active) setLoading(false); }
+    })();
+    return () => { active = false; };
+  }, [workspaceSlug]);
+  const filtered = leads.filter(lead => `${lead.email} ${lead.fullName || ''} ${lead.company || ''}`.toLowerCase().includes(query.toLowerCase()));
+  function download() {
+    const cell = (value: unknown) => {
+      const text = String(value ?? '');
+      return `"${(/^[=+\-@\t\r]/.test(text) ? "'" + text : text).replaceAll('"', '""')}"`;
+    };
+    const rows = [['Email', 'Name', 'Company', 'Project', 'Captured at'], ...filtered.map(lead => [lead.email, lead.fullName, lead.company, lead.flowTitle, lead.createdAt])];
+    const url = URL.createObjectURL(new Blob([rows.map(row => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${workspaceSlug}-leads.csv`; anchor.click(); URL.revokeObjectURL(url);
   }
-
-  return (
-    <WorkspaceShell workspaceSlug={params.workspaceSlug}>
-      <div className="mx-auto w-full max-w-6xl space-y-6 px-8 py-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Captured Leads & Audience Reveal</h1>
-            <p className="text-xs text-slate-500">
-              Prospects who completed Lead Capture chapters in your Interactive Demos.
-            </p>
-          </div>
-          <form onSubmit={handleAddLead} className="flex gap-2">
-            <input
-              type="email"
-              placeholder="lead@enterprise.io"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs"
-            />
-            <input
-              type="text"
-              placeholder="Company"
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
-              className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs"
-            />
-            <button
-              type="submit"
-              className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white"
-            >
-              <Plus className="h-3.5 w-3.5" /> Capture Lead
-            </button>
-          </form>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-slate-200 text-slate-400 uppercase">
-                <th className="pb-3">Contact Email</th>
-                <th className="pb-3">Company</th>
-                <th className="pb-3">Source Demo</th>
-                <th className="pb-3">Steps Completed</th>
-                <th className="pb-3">CRM Sync</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {leads.map((lead) => (
-                <tr key={lead.id}>
-                  <td className="py-3.5 font-semibold text-slate-900">{lead.email}</td>
-                  <td className="py-3.5 text-slate-600">{lead.company}</td>
-                  <td className="py-3.5 text-slate-600">{lead.flowTitle}</td>
-                  <td className="py-3.5 text-slate-600">
-                    {lead.stepsCompleted} / {lead.totalSteps}
-                  </td>
-                  <td className="py-3.5">
-                    <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
-                      Synced to HubSpot
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </WorkspaceShell>
-  );
+  return <WorkspaceShell workspaceSlug={workspaceSlug}><main className="page-wrap"><header className="mb-8 flex flex-wrap items-end justify-between gap-5"><div><p className="eyebrow">05 / Captured leads</p><h1 className="page-title mt-3">People, not placeholders.</h1><p className="page-intro mt-4">Contacts submitted through your workspace’s project forms.</p></div><button className="btn-secondary" disabled={loading || !!error || !filtered.length} onClick={download}>Export visible leads</button></header>{error && <p role="alert" className="status-error">{error}</p>}{loading ? <p role="status">Loading captured leads…</p> : !error && <section className="panel"><div className="mb-6 flex flex-wrap items-end justify-between gap-5"><h2 className="panel-heading">{leads.length} captured {leads.length === 1 ? 'lead' : 'leads'}</h2><label htmlFor="lead-search" className="field-label">Find a contact<input id="lead-search" className="field mt-2 w-full" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Name, email, or company" /></label></div>{!filtered.length ? <div className="empty-state"><h3 className="font-semibold">{leads.length ? 'No matching contacts.' : 'No leads captured yet.'}</h3><p className="mt-2 text-sm">Use a lead form in a published project to collect genuine viewer submissions.</p><Link className="btn-secondary mt-5" href={`/workspaces/${workspaceSlug}`}>Back to projects</Link></div> : <div className="overflow-x-auto"><table className="data-table w-full text-left"><thead><tr><th>Contact</th><th>Company</th><th>Project</th><th>Captured</th></tr></thead><tbody>{filtered.map(lead => <tr key={lead.id}><td><p className="font-medium">{lead.fullName || lead.email}</p>{lead.fullName && <p className="text-sm text-slate-500">{lead.email}</p>}</td><td>{lead.company || 'Not provided'}</td><td>{lead.flowTitle || 'Not recorded'}</td><td className="whitespace-nowrap">{new Date(lead.createdAt).toLocaleDateString()}</td></tr>)}</tbody></table></div>}<p className="mt-6 border-t border-slate-200 pt-5 text-sm text-slate-500">CRM sync is not available. This page does not imply that contacts have been sent to an external service.</p></section>}</main></WorkspaceShell>;
 }

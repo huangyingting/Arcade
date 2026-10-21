@@ -1,48 +1,31 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { api, body, HttpError, text } from '@/lib/api';
+import { assetStatus, collectionAccess, validateCollectionItems, validateContent } from '@/lib/assets';
 
-export async function GET(
-  _request: Request,
-  { params: rawParams }: { params: Promise<{ pid: string }> }
-) {
-  const params = await rawParams;
-  let collection = await prisma.collection.findFirst({
-    where: { OR: [{ id: params.pid }, { shareId: params.pid }] },
-  });
-  if (!collection) {
-    collection = await prisma.collection.findFirst({
-      orderBy: { updatedAt: 'desc' },
-    });
-  }
-
-  const flows = await prisma.flow.findMany();
-  const videos = await prisma.promptVideo.findMany();
-
-  return NextResponse.json({ collection, flows, videos });
-}
-
-export async function PATCH(
-  request: Request,
-  { params: rawParams }: { params: Promise<{ pid: string }> }
-) {
-  const params = await rawParams;
-  const body = await request.json();
-  const collection = await prisma.collection.findFirst({
-    where: { OR: [{ id: params.pid }, { shareId: params.pid }] },
-  });
-  if (!collection) {
-    return NextResponse.json({ error: 'Collection not found' }, { status: 404 });
-  }
-
+type Context = { params: Promise<{ pid: string }> };
+export const GET = api<Context>(async (_request, { params }) => {
+  const { asset, workspace, role } = await collectionAccess((await params).pid);
+  const [flows, videos] = await Promise.all([
+    prisma.flow.findMany({ where: { workspaceId: workspace.id, status: 'PUBLISHED', visibility: { not: 'PRIVATE' } } }),
+    prisma.promptVideo.findMany({ where: { workspaceId: workspace.id, status: 'PUBLISHED' } }),
+  ]);
+  return NextResponse.json({ collection: { ...asset, workspace: { slug: workspace.slug }, role }, flows, videos });
+});
+export const PATCH = api<Context>(async (request, { params }) => {
+  const { asset, workspace } = await collectionAccess((await params).pid, true);
+  const input = await body(request);
   const data: Record<string, unknown> = {};
-  if (typeof body.name === 'string') data.name = body.name;
-  if (body.header) data.headerJson = JSON.stringify(body.header);
-  if (body.items) data.itemsJson = JSON.stringify(body.items);
-
-  const updated = await prisma.collection.update({
-    where: { id: collection.id },
-    data,
-  });
-
-  return NextResponse.json({ collection: updated });
-}
+  if ('name' in input) data.name = text(input.name, 'Collection name', 200);
+  if ('header' in input) data.headerJson = validateContent(input.header, workspace.id);
+  if ('items' in input) data.itemsJson = await validateCollectionItems(input.items, workspace.id);
+  if ('status' in input) {
+    data.status = assetStatus(input.status);
+    if (data.status === 'PUBLISHED') {
+      const items = input.items ?? JSON.parse(asset.itemsJson);
+      if (!Array.isArray(items) || !items.length) throw new HttpError(400, 'Add at least one published asset before publishing this collection.');
+      await validateCollectionItems(items, workspace.id);
+    }
+  }
+  return NextResponse.json({ collection: await prisma.collection.update({ where: { id: asset.id }, data }) });
+});

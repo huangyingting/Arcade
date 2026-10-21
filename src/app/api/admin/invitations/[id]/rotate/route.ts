@@ -1,44 +1,10 @@
 import { NextResponse } from 'next/server';
-import {
-  accountAdmissionSecretLink,
-  rotateAccountInvitation,
-} from '@/lib/account-admission';
+import { rotateAccountInvitation, accountAdmissionSecretLink } from '@/lib/account-admission';
+import { api, body, requireAdmin, text } from '@/lib/api';
 
-export async function POST(
-  request: Request,
-  { params: rawParams }: { params: Promise<{ id: string }> }
-) {
-  const params = await rawParams;
-  try {
-    const body = await request.json().catch(() => ({}));
-    const expiresAt = body.expiresAt ? new Date(String(body.expiresAt)) : undefined;
-
-    const grant = await rotateAccountInvitation(params.id, expiresAt);
-    const acceptUrl = accountAdmissionSecretLink(
-      '/invite',
-      grant.token,
-      request.url
-    );
-
-    return NextResponse.json({
-      ok: true,
-      invitation: {
-        id: grant.invitation.id,
-        email: grant.invitation.email,
-        status: grant.invitation.status,
-        expiresAt: grant.invitation.expiresAt,
-        createdAt: grant.invitation.createdAt,
-        acceptedAt: grant.invitation.acceptedAt,
-        revokedAt: grant.invitation.revokedAt,
-      },
-      token: grant.token,
-      acceptUrl,
-      delivery: grant.delivery,
-    });
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message || 'Could not rotate invitation.' },
-      { status: err?.status || 400 }
-    );
-  }
-}
+export const POST = api<{ params: Promise<{ id: string }> }>(async (request, { params }) => {
+  await requireAdmin();
+  const input = await body(request);
+  const grant = await rotateAccountInvitation((await params).id, input.expiresAt ? new Date(text(input.expiresAt, 'Expiry', 100)) : undefined);
+  return NextResponse.json({ ok: true, invitation: { id: grant.invitation.id, status: grant.invitation.status }, acceptUrl: accountAdmissionSecretLink('/invite', grant.token, request.url), delivery: grant.delivery });
+});

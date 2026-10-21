@@ -8,5 +8,7 @@ node_modules/
 prisma/*.db
 prisma/*.db-journal
 public/uploads/
+storage/
+prisma/*.db-wal
+prisma/*.db-shm
 *.tsbuildinfo
-

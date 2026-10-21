@@ -1,162 +1,30 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  FolderPlus,
-  Layers,
-  Video,
-  Image as ImageIcon,
-  LayoutGrid,
-  List,
-  Search,
-  ExternalLink,
-  Trash2,
-} from 'lucide-react';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 
-export default function TeamLibraryPage({
-  params: rawParams,
-}: {
-  params: Promise<{ workspaceSlug: string; teamSlug: string }>;
-}) {
-  const { workspaceSlug, teamSlug } = React.use(rawParams);
-  const [filterType, setFilterType] = useState<'ALL' | 'FLOW' | 'VIDEO' | 'VISUAL' | 'COLLECTION'>('ALL');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+type Team = { id: string; slug: string; name: string; members?: Array<{ id: string; user: { name?: string; email?: string } }> };
+type Flow = { id: string; teamId: string | null; name: string; status: string; updatedAt: string; shareId?: string };
+export default function TeamLibraryPage({ params }: { params: Promise<{ workspaceSlug: string; teamSlug: string }> }) {
+  const { workspaceSlug, teamSlug } = use(params);
+  const [workspace, setWorkspace] = useState<{ teams: Team[]; flows: Flow[]; role: string } | null>(null);
+  const [error, setError] = useState('');
   const [query, setQuery] = useState('');
-  const [workspace, setWorkspace] = useState<any>(null);
-
   useEffect(() => {
-    fetch(`/api/workspaces/${workspaceSlug}`)
-      .then((r) => r.json())
-      .then((d) => setWorkspace(d.workspace));
+    let active = true; setWorkspace(null); setError('');
+    void (async () => {
+      try {
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceSlug)}`);
+        const data = await response.json();
+        if (!response.ok || !data.workspace) throw new Error(data.error || 'Unable to load this team.');
+        if (active) setWorkspace(data.workspace);
+      } catch (error) { if (active) setError(error instanceof Error ? error.message : 'Unable to load the team library.'); }
+    })();
+    return () => { active = false; };
   }, [workspaceSlug]);
-
-  const items = [
-    ...(workspace?.promptVideos || []).map((v: any) => ({
-      id: v.id,
-      type: 'VIDEO',
-      badge: `AI Video • ${v.durationSec}s`,
-      name: v.name,
-      thumb: v.thumbnailUrl || '/media/scene1.png',
-      editHref: `/prompt-videos/custom/${v.id}/edit`,
-      shareHref: `/share/videos/${v.shareId}`,
-      updatedAt: v.updatedAt,
-    })),
-    ...(workspace?.flows || []).map((f: any) => ({
-      id: f.id,
-      type: 'FLOW',
-      badge: 'Interactive Demo',
-      name: f.name,
-      thumb: f.thumbnailUrl || '/media/scene1.png',
-      editHref: `/flows/${f.id}/edit`,
-      shareHref: `/share/${f.shareId}`,
-      updatedAt: f.updatedAt,
-    })),
-    ...(workspace?.visualProjects || []).map((vp: any) => ({
-      id: vp.id,
-      type: 'VISUAL',
-      badge: 'AI Visuals',
-      name: vp.name,
-      thumb: vp.thumbnailUrl || '/media/visual_preview.png',
-      editHref: `/visual-projects/${vp.id}/edit`,
-      shareHref: `/visual-projects/${vp.id}/edit`,
-      updatedAt: vp.updatedAt,
-    })),
-    ...(workspace?.collections || []).map((c: any) => ({
-      id: c.id,
-      type: 'COLLECTION',
-      badge: 'Collection',
-      name: c.name,
-      thumb: '/media/scene2.png',
-      editHref: `/collections/${c.id}/edit`,
-      shareHref: `/share/collections/${c.shareId}`,
-      updatedAt: c.updatedAt,
-    })),
-  ].filter(
-    (item) =>
-      (filterType === 'ALL' || item.type === filterType) &&
-      (!query || item.name.toLowerCase().includes(query.toLowerCase()))
-  );
-
-  return (
-    <WorkspaceShell workspaceSlug={workspaceSlug}>
-      <div className="mx-auto w-full max-w-6xl space-y-6 px-8 py-8">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">
-              Library — {teamSlug === 'me' ? 'jack wolf (Personal)' : teamSlug}
-            </h1>
-            <p className="text-xs text-slate-500">
-              Organize your Interactive Demos, AI Launch Videos, Multi-Format Visuals, and Collections.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Filter library..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="rounded-xl border border-slate-200 pl-8 pr-3 py-1.5 text-xs"
-              />
-            </div>
-            <button
-              onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-              className="rounded-xl border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
-            >
-              {viewMode === 'grid' ? <List className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Filter Pills */}
-        <div className="flex flex-wrap gap-2">
-          {(['ALL', 'VIDEO', 'FLOW', 'VISUAL', 'COLLECTION'] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilterType(f)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-                filterType === f
-                  ? 'bg-indigo-600 text-white'
-                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {f === 'ALL' ? 'All Assets' : f}
-            </button>
-          ))}
-        </div>
-
-        <div className={viewMode === 'grid' ? 'grid grid-cols-1 gap-5 sm:grid-cols-3' : 'space-y-3'}>
-          {items.map((item) => (
-            <div
-              key={`${item.type}-${item.id}`}
-              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs hover:shadow-md transition"
-            >
-              {viewMode === 'grid' && (
-                <img src={item.thumb} alt={item.name} className="h-40 w-full object-cover" />
-              )}
-              <div className="p-4 flex items-center justify-between gap-4">
-                <div className="truncate">
-                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
-                    {item.badge}
-                  </span>
-                  <h3 className="mt-1.5 font-bold text-sm text-slate-900 truncate">{item.name}</h3>
-                </div>
-                <div className="flex shrink-0 items-center gap-2 text-xs font-semibold">
-                  <Link href={item.editHref} className="text-indigo-600 hover:underline">
-                    Edit →
-                  </Link>
-                  <Link href={item.shareHref} className="text-slate-400 hover:text-slate-900">
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </Link>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </WorkspaceShell>
-  );
+  const team = workspace?.teams.find(item => item.slug === teamSlug);
+  const flows = workspace?.flows.filter(flow => flow.teamId === team?.id && flow.status !== 'DELETED' && flow.status !== 'ARCHIVED' && flow.name.toLowerCase().includes(query.toLowerCase())) || [];
+  const editable = workspace?.role !== 'VIEWER';
+  return <WorkspaceShell workspaceSlug={workspaceSlug}><main className="page-wrap"><header className="mb-8"><p className="eyebrow">02 / Team library</p><h1 className="page-title mt-3">{team?.name || 'Team library'}</h1><p className="page-intro mt-4">Walkthroughs explicitly assigned to this team. Workspace-wide videos, visuals, and collections stay in your main library.</p></header>{error ? <p role="alert" className="status-error">{error}</p> : !workspace ? <p role="status">Loading team library…</p> : !team ? <section className="empty-state"><h2 className="text-xl font-semibold">This team was not found.</h2><p className="mt-3 text-sm">The team may have been removed, or this address may be incorrect. No other team has been substituted.</p><Link href={`/workspaces/${workspaceSlug}`} className="btn-primary mt-5">Back to workspace</Link></section> : <><section className="panel"><div className="mb-6 flex flex-wrap items-end justify-between gap-5"><h2 className="panel-heading">Team walkthroughs</h2><label htmlFor="team-search" className="field-label">Search projects<input id="team-search" type="search" value={query} onChange={event => setQuery(event.target.value)} className="field mt-2 w-full" /></label></div>{!flows.length ? <div className="empty-state"><h3 className="font-semibold">{query ? 'No matching walkthroughs.' : 'A clear space for your team’s work.'}</h3><p className="mt-2 text-sm">Walkthroughs appear here when they are assigned to {team.name}.</p><Link href={`/workspaces/${workspaceSlug}`} className="btn-secondary mt-5">Open workspace projects →</Link></div> : <div className="divide-y divide-slate-200">{flows.map(flow => <article className="flex flex-wrap items-center justify-between gap-4 py-5" key={flow.id}><div><p className="eyebrow">{flow.status}</p><h3 className="mt-2 text-xl font-semibold">{flow.name}</h3><p className="mt-2 text-sm text-slate-500">Updated {new Date(flow.updatedAt).toLocaleDateString()}</p></div><div className="flex gap-2">{editable && <Link className="btn-secondary" href={`/flows/${flow.id}/edit`}>Open editor ↗</Link>}{flow.status === 'PUBLISHED' && flow.shareId && <Link className="btn-quiet" href={`/share/${flow.shareId}`}>View published</Link>}</div></article>)}</div>}</section><section className="panel mt-6"><h2 className="panel-heading">Team members</h2>{!team.members?.length ? <p className="mt-4 text-sm text-slate-500">No team members are recorded.</p> : <ul className="mt-4 space-y-3">{team.members.map(member => <li key={member.id} className="text-sm">{member.user.name || member.user.email || 'Member'}</li>)}</ul>}</section></>}</main></WorkspaceShell>;
 }

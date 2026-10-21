@@ -1,4 +1,4 @@
-export const ACCOUNT_ADMISSION_MODES = ['invitation-only', 'public'] as const;
+export const ACCOUNT_ADMISSION_MODES = ['invitation-only'] as const;
 export type AccountAdmissionMode = (typeof ACCOUNT_ADMISSION_MODES)[number];
 
 export function normalizeAccountEmail(email: string): string {
@@ -18,10 +18,7 @@ export function isValidAccountEmail(email: string): boolean {
 }
 
 export function accountAdmissionMode(): AccountAdmissionMode {
-  const configured = process.env.ACCOUNT_ADMISSION_MODE?.trim().toLowerCase();
-  return configured === 'public' || configured === 'invitation-only'
-    ? configured
-    : 'invitation-only';
+  return 'invitation-only';
 }
 
 export function accountAdmissionPublicOrigin(requestUrl?: string): string {
@@ -30,20 +27,14 @@ export function accountAdmissionPublicOrigin(requestUrl?: string): string {
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.NEXTAUTH_URL;
   if (envOrigin) {
-    try {
-      return new URL(envOrigin).origin;
-    } catch {
-      // fall through
-    }
+    const url = new URL(envOrigin);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Configure a valid application origin.');
+    return url.origin;
   }
   if (requestUrl) {
-    try {
-      return new URL(requestUrl).origin;
-    } catch {
-      // fall through
-    }
+    return new URL(requestUrl).origin;
   }
-  return 'http://localhost:3000';
+  throw new Error('Set NEXTAUTH_URL before creating account links.');
 }
 
 export function accountAdmissionSecretLink(

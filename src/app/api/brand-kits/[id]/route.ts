@@ -1,81 +1,38 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { api, body, HttpError, text, safeLink, throttle } from '@/lib/api';
+import { brandAccess, validateContent } from '@/lib/assets';
 import { crawlAndCaptureWebsite } from '@/lib/production-engine/live-crawler';
+import { withWorkspaceStorage } from '@/lib/production-engine/storage';
 
-export async function GET(
-  _request: Request,
-  { params: rawParams }: { params: Promise<{ id: string }> }
-) {
-  const params = await rawParams;
-  let brandKit = await prisma.brandKit.findUnique({
-    where: { id: params.id },
-  });
-  if (!brandKit) {
-    brandKit = await prisma.brandKit.findFirst({
-      orderBy: { isDefault: 'desc' },
-    });
-  }
-  return NextResponse.json({ brandKit });
-}
-
-export async function PATCH(
-  request: Request,
-  { params: rawParams }: { params: Promise<{ id: string }> }
-) {
-  const params = await rawParams;
-  const body = await request.json();
-  const existing = await prisma.brandKit.findUnique({ where: { id: params.id } });
-  if (!existing) {
-    return NextResponse.json({ error: 'Brand Kit not found' }, { status: 404 });
-  }
-
+type Context = { params: Promise<{ id: string }> };
+export const GET = api<Context>(async (_request, { params }) => {
+  const { asset, role } = await brandAccess((await params).id);
+  return NextResponse.json({ brandKit: { ...asset, role } });
+});
+export const PATCH = api<Context>(async (request, { params }) => {
+  const { asset, workspace, user } = await brandAccess((await params).id, true);
+  const input = await body(request);
   const data: Record<string, unknown> = {};
-  if (typeof body.name === 'string') data.name = body.name;
-  if (typeof body.sourceUrl === 'string') data.sourceUrl = body.sourceUrl;
-  if (typeof body.isDefault === 'boolean') data.isDefault = body.isDefault;
-  if (body.sources) data.sourcesJson = JSON.stringify(body.sources);
-  if (body.logos) data.logosJson = JSON.stringify(body.logos);
-  if (body.colors) data.colorsJson = JSON.stringify(body.colors);
-  if (body.fonts) data.fontsJson = JSON.stringify(body.fonts);
-  if (body.photography) data.photographyJson = JSON.stringify(body.photography);
-  if (body.backgrounds) data.backgroundsJson = JSON.stringify(body.backgrounds);
-  if (body.illustrations) data.illustrationsJson = JSON.stringify(body.illustrations);
-  if (body.product) data.productJson = JSON.stringify(body.product);
-  if (body.voice) data.voiceJson = JSON.stringify(body.voice);
-  if (body.tones) data.tonesJson = JSON.stringify(body.tones);
-  if (body.demoSettings) data.demoSettingsJson = JSON.stringify(body.demoSettings);
-  if (body.sharePage) data.sharePageJson = JSON.stringify(body.sharePage);
-  if (body.customElements) data.customElementsJson = JSON.stringify(body.customElements);
-
-  if (body.resyncUrl || body.recrawl) {
-    const targetUrl =
-      typeof body.resyncUrl === 'string' && body.resyncUrl.trim()
-        ? body.resyncUrl.trim()
-        : existing.sourceUrl;
-    const crawl = await crawlAndCaptureWebsite(targetUrl);
-    const sources = JSON.parse(existing.sourcesJson || '[]');
-    const existingPhotos = JSON.parse(existing.photographyJson || '[]');
-    sources.unshift({
-      id: `src_${Date.now()}`,
-      url: crawl.url,
-      type: 'Website',
-      status: crawl.crawledLive ? 'Live Crawled' : 'Synced',
-      lastSyncedAt: new Date().toISOString(),
-      pagesIndexed: crawl.screenshots.length,
-    });
-    data.sourcesJson = JSON.stringify(sources);
-    if (crawl.crawledLive && crawl.screenshots.length > 0) {
-      data.photographyJson = JSON.stringify([
-        ...crawl.screenshots.map((s) => ({ id: s.id, title: s.title, url: s.url })),
-        ...existingPhotos,
-      ]);
-    }
+  if ('name' in input) data.name = text(input.name, 'Brand name', 200);
+  if ('sourceUrl' in input) data.sourceUrl = safeLink(text(input.sourceUrl, 'Website URL', 2000));
+  const fields = { sources: 'array', logos: 'object', colors: 'array', fonts: 'object', photography: 'array', backgrounds: 'array', illustrations: 'array', product: 'object', voice: 'object', tones: 'array', demoSettings: 'object', sharePage: 'object', customElements: 'array' } as const;
+  for (const [key, kind] of Object.entries(fields)) {
+    if (key in input) data[`${key}Json`] = validateContent(input[key], workspace.id, kind);
   }
-
-  const updated = await prisma.brandKit.update({
-    where: { id: existing.id },
-    data,
+  if (Array.isArray(input.colors) && input.colors.some((color) => !color || typeof color !== 'object' || !('hex' in color) || typeof color.hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(color.hex))) throw new HttpError(400, 'Brand colors must use six-digit hexadecimal values.');
+  if (input.resyncUrl || input.recrawl) {
+    await throttle(`capture:${user.id}`, 12, 3600);
+    const crawl = await withWorkspaceStorage(workspace.id, () => crawlAndCaptureWebsite(input.resyncUrl ? text(input.resyncUrl, 'Website URL', 2000) : asset.sourceUrl));
+    data.sourceUrl = crawl.url;
+    data.sourcesJson = JSON.stringify([{ id: crypto.randomUUID(), url: crawl.url, status: 'Captured', lastSyncedAt: new Date().toISOString(), pagesIndexed: crawl.screenshots.length }]);
+    data.colorsJson = JSON.stringify(crawl.colors);
+    data.fontsJson = JSON.stringify(crawl.fonts);
+    data.photographyJson = JSON.stringify(crawl.screenshots.map((s) => ({ id: crypto.randomUUID(), title: s.title, url: s.url })));
+  }
+  const brandKit = await prisma.$transaction(async (tx) => {
+    if (input.isDefault === true) await tx.brandKit.updateMany({ where: { workspaceId: workspace.id }, data: { isDefault: false } });
+    return tx.brandKit.update({ where: { id: asset.id }, data: { ...data, ...('isDefault' in input ? { isDefault: input.isDefault === true } : {}) } });
   });
-
-  return NextResponse.json({ brandKit: updated });
-}
+  return NextResponse.json({ brandKit });
+});

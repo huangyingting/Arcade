@@ -1,60 +1,23 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { api, workspaceAccess, workspaceQuery } from '@/lib/api';
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const q = (searchParams.get('q') || '').toLowerCase().trim();
-
-  const [flows, videos, visuals, collections, brandKits] = await Promise.all([
-    prisma.flow.findMany({ where: { status: { not: 'DELETED' } } }),
-    prisma.promptVideo.findMany({ where: { status: { not: 'DELETED' } } }),
-    prisma.visualProject.findMany({ where: { status: { not: 'DELETED' } } }),
-    prisma.collection.findMany({ where: { status: { not: 'DELETED' } } }),
-    prisma.brandKit.findMany(),
+export const GET = api(async (request) => {
+  const { workspace } = await workspaceAccess(workspaceQuery(request));
+  const query = (new URL(request.url).searchParams.get('q') || '').slice(0, 100).trim();
+  const where = { workspaceId: workspace.id, status: { not: 'DELETED' }, ...(query ? { name: { contains: query } } : {}) };
+  const [flows, videos, visuals, collections, kits] = await Promise.all([
+    prisma.flow.findMany({ where, take: 20, orderBy: { updatedAt: 'desc' } }),
+    prisma.promptVideo.findMany({ where, take: 20, orderBy: { updatedAt: 'desc' } }),
+    prisma.visualProject.findMany({ where, take: 20, orderBy: { updatedAt: 'desc' } }),
+    prisma.collection.findMany({ where, take: 20, orderBy: { updatedAt: 'desc' } }),
+    prisma.brandKit.findMany({ where: { workspaceId: workspace.id, ...(query ? { name: { contains: query } } : {}) }, take: 20 }),
   ]);
-
-  const results = [
-    ...flows.map((f) => ({
-      id: f.id,
-      type: 'Interactive Demo',
-      title: f.name,
-      url: `/flows/${f.id}/edit`,
-      shareUrl: `/share/${f.shareId}`,
-      updatedAt: f.updatedAt,
-    })),
-    ...videos.map((v) => ({
-      id: v.id,
-      type: 'AI Video',
-      title: v.name,
-      url: `/prompt-videos/custom/${v.id}/edit`,
-      shareUrl: `/share/videos/${v.shareId}`,
-      updatedAt: v.updatedAt,
-    })),
-    ...visuals.map((vp) => ({
-      id: vp.id,
-      type: 'AI Visuals',
-      title: vp.name,
-      url: `/visual-projects/${vp.id}/edit`,
-      shareUrl: `/visual-projects/${vp.id}/edit`,
-      updatedAt: vp.updatedAt,
-    })),
-    ...collections.map((c) => ({
-      id: c.id,
-      type: 'Collection',
-      title: c.name,
-      url: `/collections/${c.id}/edit`,
-      shareUrl: `/share/collections/${c.shareId}`,
-      updatedAt: c.updatedAt,
-    })),
-    ...brandKits.map((bk) => ({
-      id: bk.id,
-      type: 'Brand Kit',
-      title: bk.name,
-      url: `/workspaces/workspace-5p8xcsfv/settings/brand-kits/${bk.id}`,
-      shareUrl: `/workspaces/workspace-5p8xcsfv/settings/brand-kits/${bk.id}`,
-      updatedAt: bk.updatedAt,
-    })),
-  ].filter((item) => !q || item.title.toLowerCase().includes(q) || item.type.toLowerCase().includes(q));
-
-  return NextResponse.json({ results });
-}
+  return NextResponse.json({ results: [
+    ...flows.map((f) => ({ id: f.id, type: 'Demo', title: f.name, url: `/flows/${f.id}/edit` })),
+    ...videos.map((v) => ({ id: v.id, type: 'Video', title: v.name, url: `/prompt-videos/custom/${v.id}/edit` })),
+    ...visuals.map((v) => ({ id: v.id, type: 'Visuals', title: v.name, url: `/visual-projects/${v.id}/edit` })),
+    ...collections.map((c) => ({ id: c.id, type: 'Collection', title: c.name, url: `/collections/${c.id}/edit` })),
+    ...kits.map((k) => ({ id: k.id, type: 'Brand kit', title: k.name, url: `/workspaces/${workspace.slug}/settings/brand-kits/${k.id}` })),
+  ] });
+});

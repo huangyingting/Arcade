@@ -1,5 +1,7 @@
 # Product & Functional Requirements Specification (PRD) — Arcade Platform Clone
 
+> Research backlog and acceptance targets, not a shipped-feature checklist. See the [current capability matrix](../README.md#real-capabilities-and-boundaries) and [operations](05_PRODUCTION_OPERATIONS.md).
+
 **Project**: Arcade Full-Stack Platform (`www.arcade.software` + `app.arcade.software`)  
 **Version**: 1.0  
 **Date**: 2026-10-15  

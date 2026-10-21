@@ -1,173 +1,93 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { api, body, HttpError, integer, jsonField, text, workspaceAccess } from '@/lib/api';
+import { assetStatus } from '@/lib/assets';
 
-const WORKSPACE_INCLUDE = {
-  members: { include: { user: true } },
-  teams: { include: { members: { include: { user: true } }, folders: true } },
-  folders: true,
-  brandKits: { orderBy: { createdAt: 'desc' as const } },
-  flows: { orderBy: { updatedAt: 'desc' as const } },
-  promptVideos: { orderBy: { updatedAt: 'desc' as const }, include: { sessions: true } },
-  visualProjects: { orderBy: { updatedAt: 'desc' as const } },
-  collections: { orderBy: { updatedAt: 'desc' as const } },
-  leads: { orderBy: { createdAt: 'desc' as const } },
-  analyticsEvents: { orderBy: { createdAt: 'desc' as const }, take: 100 },
-  creditTransactions: { orderBy: { createdAt: 'desc' as const } },
-  memories: { orderBy: { createdAt: 'desc' as const } },
-  connectors: true,
-  integrations: true,
-  customLinks: true,
-  notifications: { orderBy: { createdAt: 'desc' as const } },
-};
+type Context = { params: Promise<{ slug: string }> };
+const safeMemberUser = { id: true, name: true, email: true, image: true } as const;
 
-export async function GET(
-  _request: Request,
-  { params: rawParams }: { params: Promise<{ slug: string }> }
-) {
-  const params = await rawParams;
-  let workspace = await prisma.workspace.findUnique({
-    where: { slug: params.slug },
-    include: WORKSPACE_INCLUDE,
-  });
-
-  if (!workspace) {
-    workspace = await prisma.workspace.findFirst({
-      include: WORKSPACE_INCLUDE,
-    });
-  }
-
-  return NextResponse.json({ workspace });
-}
-
-export async function PATCH(
-  request: Request,
-  { params: rawParams }: { params: Promise<{ slug: string }> }
-) {
-  const params = await rawParams;
-  const body = await request.json();
-  const workspace = await prisma.workspace.findFirst({
-    where: { OR: [{ slug: params.slug }, { id: params.slug }] },
-  });
-  if (!workspace) {
-    return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
-  }
-
-  const updateData: Record<string, unknown> = {};
-  if (typeof body.name === 'string') updateData.name = body.name;
-  if (typeof body.slug === 'string') updateData.slug = body.slug;
-  if (body.privacySettings) updateData.privacySettingsJson = JSON.stringify(body.privacySettings);
-  if (body.translationSettings) updateData.translationSettingsJson = JSON.stringify(body.translationSettings);
-  if (body.pronunciationRules) updateData.pronunciationRulesJson = JSON.stringify(body.pronunciationRules);
-  if (body.syntheticVoices) updateData.syntheticVoicesJson = JSON.stringify(body.syntheticVoices);
-  if (body.advancedSettings) updateData.advancedSettingsJson = JSON.stringify(body.advancedSettings);
-  if (body.onboardingChecklist) updateData.onboardingChecklistJson = JSON.stringify(body.onboardingChecklist);
-
-  if (body.newMemory) {
-    await prisma.workspaceMemory.create({
-      data: {
-        workspaceId: workspace.id,
-        category: body.newMemory.category || 'Product Fact',
-        title: body.newMemory.title,
-        content: body.newMemory.content,
-        source: body.newMemory.source || 'Manual Entry',
-      },
-    });
-  }
-
-  if (body.deleteMemoryId) {
-    await prisma.workspaceMemory.deleteMany({
-      where: { id: body.deleteMemoryId, workspaceId: workspace.id },
-    });
-  }
-
-  if (body.toggleConnectorId) {
-    const conn = await prisma.workspaceConnector.findUnique({ where: { id: body.toggleConnectorId } });
-    if (conn) {
-      await prisma.workspaceConnector.update({
-        where: { id: conn.id },
-        data: {
-          status: conn.status === 'CONNECTED' ? 'DISCONNECTED' : 'CONNECTED',
-          lastSyncAt: new Date(),
-        },
-      });
-    }
-  }
-
-  if (body.toggleIntegrationId) {
-    const integ = await prisma.workspaceIntegration.findUnique({ where: { id: body.toggleIntegrationId } });
-    if (integ) {
-      await prisma.workspaceIntegration.update({
-        where: { id: integ.id },
-        data: {
-          status: integ.status === 'CONNECTED' ? 'DISCONNECTED' : 'CONNECTED',
-        },
-      });
-    }
-  }
-
-  if (body.markNotificationReadId) {
-    await prisma.inboxNotification.updateMany({
-      where: { id: body.markNotificationReadId, workspaceId: workspace.id },
-      data: { isRead: true },
-    });
-  }
-
-  if (body.markAllNotificationsRead) {
-    await prisma.inboxNotification.updateMany({
-      where: { workspaceId: workspace.id },
-      data: { isRead: true },
-    });
-  }
-
-  if (body.assetStatusChange) {
-    const { assetType, assetId, status } = body.assetStatusChange;
-    if (assetType === 'FLOW') {
-      await prisma.flow.updateMany({ where: { id: assetId }, data: { status } });
-    } else if (assetType === 'VIDEO') {
-      await prisma.promptVideo.updateMany({ where: { id: assetId }, data: { status } });
-    } else if (assetType === 'VISUAL') {
-      await prisma.visualProject.updateMany({ where: { id: assetId }, data: { status } });
-    }
-  }
-
-  if (body.createTeamName) {
-    const teamSlug = body.createTeamName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    await prisma.team.upsert({
-      where: { workspaceId_slug: { workspaceId: workspace.id, slug: teamSlug } },
-      update: { name: body.createTeamName },
-      create: {
-        workspaceId: workspace.id,
-        name: body.createTeamName,
-        slug: teamSlug,
-        iconColor: '#2563EB',
-        isPersonal: false,
-      },
-    });
-  }
-
-  if (body.newCustomLink) {
-    await prisma.customLink.create({
-      data: {
-        workspaceId: workspace.id,
-        assetType: body.newCustomLink.assetType || 'FLOW',
-        assetId: body.newCustomLink.assetId || '4fLyMFzH8BjqgKQF4Bd6',
-        slug: body.newCustomLink.slug || `link-${Date.now()}`,
-        recipient: body.newCustomLink.recipient || 'Enterprise Prospect',
-      },
-    });
-  }
-
-  if (Object.keys(updateData).length > 0) {
-    await prisma.workspace.update({
-      where: { id: workspace.id },
-      data: updateData,
-    });
-  }
-
-  const refreshed = await prisma.workspace.findUnique({
+export const GET = api<Context>(async (_request, { params }) => {
+  const { slug } = await params;
+  const { workspace, role, user } = await workspaceAccess(slug);
+  const admin = ['OWNER', 'ADMIN'].includes(role);
+  const data = await prisma.workspace.findUnique({
     where: { id: workspace.id },
-    include: WORKSPACE_INCLUDE,
+    include: {
+      members: { include: { user: { select: safeMemberUser } } },
+      teams: { include: { members: { include: { user: { select: safeMemberUser } } }, folders: true } },
+      folders: true, brandKits: { orderBy: { createdAt: 'desc' } },
+      flows: { orderBy: { updatedAt: 'desc' } }, promptVideos: { orderBy: { updatedAt: 'desc' } },
+      visualProjects: { orderBy: { updatedAt: 'desc' } }, collections: { orderBy: { updatedAt: 'desc' } },
+      leads: admin ? { orderBy: { createdAt: 'desc' }, take: 200 } : false,
+      analyticsEvents: { orderBy: { createdAt: 'desc' }, take: 200 },
+      creditTransactions: admin ? { orderBy: { createdAt: 'desc' }, take: 100 } : false,
+      memories: { orderBy: { createdAt: 'desc' } },
+      connectors: { select: { id: true, name: true, provider: true, status: true, lastSyncAt: true } },
+      integrations: { select: { id: true, provider: true, status: true } },
+      customLinks: true,
+      notifications: { where: { OR: [{ userId: null }, { userId: user.id }] }, orderBy: { createdAt: 'desc' }, take: 100 },
+    },
   });
+  return NextResponse.json({ workspace: { ...data, role }, user });
+});
 
-  return NextResponse.json({ workspace: refreshed });
-}
+export const PATCH = api<Context>(async (request, { params }) => {
+  const { slug } = await params;
+  const input = await body(request);
+  const adminKeys = ['name', 'slug', 'privacySettings', 'translationSettings', 'pronunciationRules', 'syntheticVoices', 'advancedSettings'];
+  const needsAdmin = adminKeys.some((key) => key in input);
+  const { workspace, user } = await workspaceAccess(slug, true, needsAdmin);
+  const data: { name?: string; slug?: string; privacySettingsJson?: string; translationSettingsJson?: string; pronunciationRulesJson?: string } = {};
+  if ('name' in input) data.name = text(input.name, 'Workspace name', 100);
+  if ('slug' in input) {
+    const next = text(input.slug, 'Workspace URL', 64);
+    if (!/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(next) || ['create', 'admin'].includes(next)) throw new HttpError(400, 'Invalid workspace URL.');
+    data.slug = next;
+  }
+  if ('privacySettings' in input) {
+    jsonField(input.privacySettings, 'object');
+    const settings = input.privacySettings as Record<string, unknown>;
+    if (settings.retentionDays !== undefined) integer(settings.retentionDays, 'Retention days', 1, 730);
+    if (settings.collectViewerAnalytics !== undefined && typeof settings.collectViewerAnalytics !== 'boolean') throw new HttpError(400, 'Analytics collection must be enabled or disabled.');
+    data.privacySettingsJson = JSON.stringify({ ...JSON.parse(workspace.privacySettingsJson), ...settings });
+  }
+  if ('translationSettings' in input) data.translationSettingsJson = jsonField(input.translationSettings, 'object');
+  if ('pronunciationRules' in input) data.pronunciationRulesJson = jsonField(input.pronunciationRules, 'array', 100);
+  if ('advancedSettings' in input || 'syntheticVoices' in input || 'toggleConnectorId' in input || 'toggleIntegrationId' in input || 'newCustomLink' in input) {
+    throw new HttpError(501, 'This integration is not configured. Contact your deployment administrator.');
+  }
+  await prisma.$transaction(async (tx) => {
+    if (input.newMemory) {
+      const memory = input.newMemory as Record<string, unknown>;
+      await tx.workspaceMemory.create({ data: {
+        workspaceId: workspace.id, category: text(memory.category, 'Category', 80),
+        title: text(memory.title, 'Title', 200), content: text(memory.content, 'Content', 10000), source: 'Manual entry',
+      } });
+    }
+    if (input.deleteMemoryId) await tx.workspaceMemory.deleteMany({ where: { id: text(input.deleteMemoryId, 'Memory', 100), workspaceId: workspace.id } });
+    if (input.markNotificationReadId || input.markAllNotificationsRead) await tx.inboxNotification.updateMany({
+      where: { workspaceId: workspace.id, OR: [{ userId: null }, { userId: user.id }], ...(input.markNotificationReadId ? { id: text(input.markNotificationReadId, 'Notification', 100) } : {}) },
+      data: { isRead: true },
+    });
+    if (input.createTeamName) {
+      const name = text(input.createTeamName, 'Team name', 80);
+      const teamSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      if (!teamSlug) throw new HttpError(400, 'Team name needs at least one letter or number.');
+      await tx.team.create({ data: { workspaceId: workspace.id, name, slug: teamSlug, members: { create: { userId: user.id } } } });
+    }
+    if (input.assetStatusChange) {
+      const change = input.assetStatusChange as Record<string, unknown>;
+      const id = text(change.assetId, 'Asset ID', 100);
+      const status = assetStatus(change.status);
+      if (status === 'PUBLISHED') throw new HttpError(400, 'Publish from the asset editor after reviewing its content.');
+      const where = { id, workspaceId: workspace.id };
+      const result = change.assetType === 'FLOW' ? await tx.flow.updateMany({ where, data: { status } })
+        : change.assetType === 'VIDEO' ? await tx.promptVideo.updateMany({ where, data: { status } })
+        : change.assetType === 'VISUAL' ? await tx.visualProject.updateMany({ where, data: { status } })
+        : change.assetType === 'COLLECTION' ? await tx.collection.updateMany({ where, data: { status } }) : null;
+      if (!result?.count) throw new HttpError(404, 'Asset not found.');
+    }
+    if (Object.keys(data).length) await tx.workspace.update({ where: { id: workspace.id }, data });
+  });
+  return GET(new Request(request.url), { params: Promise.resolve({ slug: data.slug || slug }) });
+});

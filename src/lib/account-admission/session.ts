@@ -10,7 +10,9 @@ export const SESSION_COOKIES = [
   '__Secure-next-auth.session-token',
 ] as const;
 
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const IS_PRODUCTION = process.env.NEXTAUTH_URL
+  ? new URL(process.env.NEXTAUTH_URL).protocol === 'https:'
+  : process.env.NODE_ENV === 'production';
 
 export const SESSION_COOKIE_NAME = IS_PRODUCTION
   ? SESSION_COOKIES[1]

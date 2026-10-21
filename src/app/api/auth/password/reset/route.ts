@@ -1,17 +1,12 @@
+import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { resetPassword } from '@/lib/account-admission';
+import { api, body, passwordInput, text, throttle } from '@/lib/api';
 
-export async function POST(request: Request) {
-  try {
-    const body = await request.json().catch(() => ({}));
-    const token = String(body.token || '');
-    const password = String(body.password || '');
-    await resetPassword({ token, password });
-    return NextResponse.json({ ok: true });
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message || 'Password reset failed.' },
-      { status: err?.status || 400 }
-    );
-  }
-}
+export const POST = api(async (request) => {
+  const input = await body(request);
+  const token = text(input.token, 'Reset token', 256);
+  await throttle(`reset:${createHash('sha256').update(token).digest('hex')}`, 8);
+  await resetPassword({ token, password: passwordInput(input.password) });
+  return NextResponse.json({ ok: true });
+});

@@ -1,536 +1,114 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  Sparkles,
-  Video,
-  Layers,
-  Image as ImageIcon,
-  FolderPlus,
-  Wand2,
-  CheckCircle2,
-  ExternalLink,
-  Play,
-  Palette,
-  Globe,
-  Clock,
-  Coins,
-  ArrowRight,
-  Plus,
-} from 'lucide-react';
+import { ArrowUpRight, ArrowRight, Layers, Film, Image as ImageIcon, FolderOpen, Plus, Palette, Loader2, Globe, Aperture } from 'lucide-react';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
-import { UI_DICTIONARY, SupportedUiLang, getSavedUiLang } from '@/lib/i18n';
+import { requestJson, errorMessage } from '@/lib/client';
+import type { AssetSummary, Capabilities, WorkspaceData } from '@/types/product';
 
-export default function WorkspaceHomePage({
-  params: rawParams,
-}: {
-  params: Promise<{ workspaceSlug: string }>;
-}) {
-  const { workspaceSlug } = React.use(rawParams);
+const modes = [
+  { id: 'demo', title: 'Interactive demo', short: 'Demo', description: 'Capture a website or begin with a blank canvas. Add steps, hotspots and your narrative.', icon: Layers, action: 'Create walkthrough' },
+  { id: 'video', title: 'Launch video', short: 'Video', description: 'Turn your brief into an editable storyboard. Review every scene before you render.', icon: Film, action: 'Build storyboard' },
+  { id: 'visuals', title: 'Campaign visuals', short: 'Visuals', description: 'Compose social and campaign graphics. One visual direction, every format you need.', icon: ImageIcon, action: 'Create visuals' },
+  { id: 'collection', title: 'Collection', short: 'Collection', description: 'Bring your published demos and videos together into one shareable destination.', icon: FolderOpen, action: 'Create collection' },
+] as const;
+type Mode = typeof modes[number]['id'];
+
+export default function WorkspaceHome({ params }: { params: Promise<{ workspaceSlug: string }> }) {
+  const { workspaceSlug } = use(params);
   const router = useRouter();
-  const [lang, setLang] = useState<SupportedUiLang>('en');
-
-  useEffect(() => {
-    setLang(getSavedUiLang());
-    const handler = (e: Event) => {
-      const next = (e as CustomEvent<SupportedUiLang>).detail;
-      if (next) setLang(next);
-    };
-    window.addEventListener('arcade-lang-change', handler);
-    return () => window.removeEventListener('arcade-lang-change', handler);
-  }, []);
-
-  const t = UI_DICTIONARY[lang] || UI_DICTIONARY.en;
-
-  const [activeTab, setActiveTab] = useState<'video' | 'demo' | 'visuals' | 'collection'>('video');
-  const [prompt, setPrompt] = useState(
-    'Create a high-impact launch video for https://whoami.genisisiq.com highlighting 120+ verified AI & cloud badges and 2,300+ indexed enterprise AI use cases.'
-  );
-  const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [mode, setMode] = useState<Mode>('demo');
+  const [prompt, setPrompt] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [name, setName] = useState('');
   const [durationSec, setDurationSec] = useState(30);
-  const [visualCategory, setVisualCategory] = useState('social_announcement');
-  const [generating, setGenerating] = useState(false);
-
-  const [workspace, setWorkspace] = useState<any>(null);
-  const [flows, setFlows] = useState<any[]>([]);
-  const [videos, setVideos] = useState<any[]>([]);
-  const [visualProjects, setVisualProjects] = useState<any[]>([]);
-  const [collections, setCollections] = useState<any[]>([]);
-  const [brandKits, setBrandKits] = useState<any[]>([]);
-  const [claimingBonus, setClaimingBonus] = useState(false);
-  const [brandKitUrl, setBrandKitUrl] = useState('https://whoami.genisisiq.com');
-  const [extractingBrandKit, setExtractingBrandKit] = useState(false);
-
-  async function loadWorkspace() {
-    const res = await fetch(`/api/workspaces/${workspaceSlug}`);
-    const data = await res.json();
-    if (data.workspace) {
-      setWorkspace(data.workspace);
-      setFlows(data.workspace.flows || []);
-      setVideos(data.workspace.promptVideos || []);
-      setVisualProjects(data.workspace.visualProjects || []);
-      setCollections(data.workspace.collections || []);
-      setBrandKits(data.workspace.brandKits || []);
-    }
-  }
-
+  const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [brandKitId, setBrandKitId] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [brandUrl, setBrandUrl] = useState('');
+  const [extracting, setExtracting] = useState(false);
+  const [brandError, setBrandError] = useState('');
   useEffect(() => {
-    loadWorkspace();
+    const controller = new AbortController();
+    Promise.all([
+      requestJson<{ workspace: WorkspaceData }>(`/api/workspaces/${workspaceSlug}`, { signal: controller.signal }),
+      requestJson<Capabilities>('/api/capabilities', { signal: controller.signal }),
+    ]).then(([data, capabilities]) => { setWorkspace(data.workspace); setCapabilities(capabilities); }).catch((e) => { if (!controller.signal.aborted) setError(errorMessage(e)); });
+    return () => controller.abort();
   }, [workspaceSlug]);
-
-  async function handleGenerate(e: React.FormEvent) {
-    e.preventDefault();
-    setGenerating(true);
+  const active = modes.find((m) => m.id === mode)!;
+  const canEdit = workspace && workspace.role !== 'VIEWER';
+  const base = `/workspaces/${workspaceSlug}`;
+  const assets = [
+    ...(workspace?.flows || []).map((a) => ({ ...a, type: 'demo', label: 'Interactive demo', icon: Layers, href: `/flows/${a.id}/edit` })),
+    ...(workspace?.promptVideos || []).map((a) => ({ ...a, type: 'video', label: 'Launch video', icon: Film, href: `/prompt-videos/custom/${a.id}/edit` })),
+    ...(workspace?.visualProjects || []).map((a) => ({ ...a, type: 'visuals', label: 'Campaign visuals', icon: ImageIcon, href: `/visual-projects/${a.id}/edit` })),
+    ...(workspace?.collections || []).map((a) => ({ ...a, type: 'collection', label: 'Collection', icon: FolderOpen, href: `/collections/${a.id}/edit` })),
+  ].filter((a) => !['DELETED', 'ARCHIVED'].includes(a.status)).sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
+  async function create(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true); setError('');
     try {
-      if (activeTab === 'video') {
-        const res = await fetch('/api/prompt-videos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt,
-            aspectRatio,
-            durationSec,
-            brandKitId: brandKits[0]?.id,
-          }),
-        });
-        const data = await res.json();
-        if (data.video?.id) {
-          router.push(`/prompt-videos/custom/${data.video.id}/edit`);
-        }
-      } else if (activeTab === 'demo') {
-        const res = await fetch('/api/flows', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: 'whoami.genisisiq.com Interactive Walkthrough',
-            prompt,
-          }),
-        });
-        const data = await res.json();
-        if (data.flow?.id) {
-          router.push(`/flows/${data.flow.id}/edit`);
-        }
-      } else if (activeTab === 'visuals') {
-        const res = await fetch('/api/visual-projects', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            category: visualCategory,
-            prompt,
-            brandKitId: brandKits[0]?.id,
-          }),
-        });
-        const data = await res.json();
-        const vpId = data.visualProject?.id || data.project?.id;
-        if (vpId) {
-          router.push(`/visual-projects/${vpId}/edit`);
-        }
-      } else {
-        const res = await fetch('/api/collections', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: prompt.slice(0, 60) || 'Product Launch Collection',
-          }),
-        });
-        const data = await res.json();
-        if (data.collection?.id) {
-          router.push(`/collections/${data.collection.id}/edit`);
-        }
-      }
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  async function handleExtractBrandKit() {
-    setExtractingBrandKit(true);
-    try {
-      const res = await fetch(`/api/workspaces/${workspaceSlug}/brand-kits`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: brandKitUrl }),
+      const endpoint = mode === 'demo' ? 'flows' : mode === 'video' ? 'prompt-videos' : mode === 'visuals' ? 'visual-projects' : 'collections';
+      const data = await requestJson<{ flow?: AssetSummary; video?: AssetSummary; project?: AssetSummary; collection?: AssetSummary }>(`/api/${endpoint}`, {
+        method: 'POST', body: JSON.stringify({ workspaceSlug, name: name || undefined, prompt, sourceUrl: sourceUrl || undefined, brandKitId: brandKitId || undefined, durationSec, aspectRatio }),
       });
-      const data = await res.json();
-      if (data.brandKit?.id) {
-        router.push(`/workspaces/${workspaceSlug}/settings/brand-kits/${data.brandKit.id}`);
-      }
-    } finally {
-      setExtractingBrandKit(false);
-    }
+      const asset = data.flow || data.video || data.project || data.collection;
+      if (!asset) throw new Error('No project was returned. Please retry.');
+      router.push(mode === 'demo' ? `/flows/${asset.id}/edit` : mode === 'video' ? `/prompt-videos/custom/${asset.id}/edit` : mode === 'visuals' ? `/visual-projects/${asset.id}/edit` : `/collections/${asset.id}/edit`);
+    } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
   }
-
-  async function handleClaimCredits() {
-    setClaimingBonus(true);
+  async function extract(event: React.FormEvent) {
+    event.preventDefault(); setExtracting(true); setBrandError('');
     try {
-      await fetch(`/api/workspaces/${workspaceSlug}/claim-credits`, {
-        method: 'POST',
-      });
-      await loadWorkspace();
-    } finally {
-      setClaimingBonus(false);
-    }
+      const { brandKit } = await requestJson<{ brandKit: { id: string } }>(`/api/workspaces/${workspaceSlug}/brand-kits`, { method: 'POST', body: JSON.stringify({ url: brandUrl }) });
+      router.push(`${base}/settings/brand-kits/${brandKit.id}`);
+    } catch (e) { setBrandError(errorMessage(e)); } finally { setExtracting(false); }
   }
-
   return (
     <WorkspaceShell workspaceSlug={workspaceSlug}>
-      <div className="mx-auto w-full max-w-6xl space-y-8 px-8 py-8">
-        {/* Top Greeting + Quick Actions */}
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">
-              {t.wsWelcome}
-            </h1>
-            <p className="text-sm text-slate-500">
-              {t.wsSubtitle}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Link
-              href={`/workspaces/${workspaceSlug}/settings/brand-kits/XE1uVIkZSLQJth6oUMJ0`}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-            >
-              <Palette className="h-3.5 w-3.5 text-amber-600" />
-              whoami.genisisiq.com Brand Kit (13 Tabs)
-            </Link>
-            <Link
-              href="/flows/4fLyMFzH8BjqgKQF4Bd6/edit"
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
-            >
-              <Plus className="h-3.5 w-3.5" /> New Arcade
-            </Link>
+      <div className="page-wrap reveal">
+        <div className="flex flex-wrap items-end justify-between gap-5">
+          <div><p className="eyebrow">01 / Creative workspace</p><h1 className="page-title">Make your product<br /><span className="text-indigo-600">the story.</span></h1><p className="page-intro">From the first interaction to the final frame.<br className="hidden sm:block" />Your ideas, one connected studio.</p></div>
+          <div className="flex gap-7 border-l border-slate-300 pl-7 pb-1">
+            <div><p className="stat-number">{assets.length.toString().padStart(2, '0')}</p><p className="eyebrow mt-2">Projects</p></div>
+            <div><p className="stat-number">{assets.filter((a) => a.status === 'PUBLISHED').length.toString().padStart(2, '0')}</p><p className="eyebrow mt-2">Published</p></div>
           </div>
         </div>
-
-        {/* 4-Tab AI Studio Composer Card */}
-        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-indigo-50/50 via-white to-amber-50/30 p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1">
-              {[
-                { id: 'video', label: t.tabVideo, icon: Video },
-                { id: 'demo', label: t.tabDemo, icon: Layers },
-                { id: 'visuals', label: t.tabVisuals, icon: ImageIcon },
-                { id: 'collection', label: t.tabCollection, icon: FolderPlus },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
-                    activeTab === tab.id
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <tab.icon className="h-3.5 w-3.5 text-indigo-600" />
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-amber-300">
-                <span className="h-2 w-2 rounded-full bg-amber-400" />
-                Brand Kit: whoami.genisisiq.com
-              </span>
-            </div>
+        {canEdit && <section id="create" className="scroll-mt-5 overflow-hidden rounded-2xl border border-slate-300 bg-[#fdfcf7]">
+          <div role="tablist" aria-label="Project type" className="flex gap-7 overflow-x-auto border-b border-slate-200 px-6 md:px-8">
+            {modes.map((m) => <button key={m.id} id={`tab-${m.id}`} aria-controls="create-panel" role="tab" aria-selected={mode === m.id} onClick={() => { setMode(m.id); setError(''); }} className="create-tab flex items-center gap-2"><m.icon size={15} strokeWidth={1.5} />{m.title}</button>)}
           </div>
-
-          <form onSubmit={handleGenerate} className="mt-4 space-y-3">
-            <textarea
-              rows={3}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Paste a website URL or describe your product launch..."
-              className="w-full rounded-xl border border-slate-200 bg-white p-3.5 text-sm text-slate-900 shadow-2xs focus:border-indigo-600 focus:outline-none"
-            />
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                {activeTab === 'video' && (
-                  <>
-                    <select
-                      value={aspectRatio}
-                      onChange={(e) => setAspectRatio(e.target.value)}
-                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-medium text-slate-700"
-                    >
-                      <option value="16:9">16:9 Landscape</option>
-                      <option value="9:16">9:16 Vertical</option>
-                      <option value="1:1">1:1 Square</option>
-                    </select>
-                    <select
-                      value={durationSec}
-                      onChange={(e) => setDurationSec(Number(e.target.value))}
-                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-medium text-slate-700"
-                    >
-                      <option value={15}>15s Fast Teaser (4 Scenes)</option>
-                      <option value={30}>30s Product Launch (6 Scenes)</option>
-                      <option value={45}>45s Deep Dive</option>
-                    </select>
-                  </>
-                )}
-
-                {activeTab === 'visuals' && (
-                  <select
-                    value={visualCategory}
-                    onChange={(e) => setVisualCategory(e.target.value)}
-                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-medium text-slate-700"
-                  >
-                    <option value="social_announcement">Social Announcement</option>
-                    <option value="product_benefits">Product Benefits</option>
-                    <option value="feature_highlight">Feature Highlight</option>
-                    <option value="website_hero">Website Hero Banner</option>
-                  </select>
-                )}
+          <div className="grid lg:grid-cols-[1fr_230px]">
+            <form role="tabpanel" id="create-panel" aria-labelledby={`tab-${mode}`} onSubmit={create} className="space-y-5 p-6 md:p-8">
+              <div><h2 className="text-xl font-semibold tracking-tight">{mode === 'demo' ? 'Show, don’t explain.' : mode === 'video' ? 'A strong story starts here.' : mode === 'visuals' ? 'Set the visual direction.' : 'One link. The whole story.'}</h2><p className="mt-2 text-xs leading-relaxed text-slate-500">{active.description}</p></div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className={mode === 'collection' ? 'sm:col-span-2' : ''}><span className="field-label">Project name {mode !== 'collection' && <span className="font-normal text-slate-400">(optional)</span>}</span><input className="field" value={name} onChange={(e) => setName(e.target.value)} required={mode === 'collection'} maxLength={200} placeholder="Give this story a name" /></label>
+                {mode !== 'collection' && <label><span className="field-label">Website <span className="font-normal text-slate-400">(optional)</span></span><input className="field" type="url" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://your-product.com" maxLength={2000} /></label>}
               </div>
-
-              <button
-                type="submit"
-                disabled={generating}
-                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 transition disabled:opacity-60"
-              >
-                <Wand2 className="h-4 w-4" />
-                {generating ? 'Synthesizing with Avery AI...' : `Generate ${activeTab.toUpperCase()} (50 credits)`}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        {/* 5-Step Getting Started Checklist + Claim 200 Bonus Credits + Autonomous Brand Kit Extractor */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-bold text-slate-900">
-                  Getting Started Checklist (5 / 5 Completed)
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Complete all 5 onboarding steps to unlock +200 bonus AI Studio credits.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleClaimCredits}
-                disabled={claimingBonus}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
-              >
-                <Coins className="h-3.5 w-3.5" />
-                {claimingBonus ? 'Claiming...' : 'Claim 200 Bonus Credits'}
-              </button>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-5">
-              {[
-                { label: '1. Extract Brand Kit', href: `/workspaces/${workspaceSlug}/settings/brand-kits/XE1uVIkZSLQJth6oUMJ0` },
-                { label: '2. Generate AI Video', href: '/prompt-videos/custom/qGe4L499rr5AsLtm6F4q/edit' },
-                { label: '3. Record Demo Flow', href: '/flows/4fLyMFzH8BjqgKQF4Bd6/edit' },
-                { label: '4. Create AI Visuals', href: '/visual-projects/mVkkeVB4j15x799NHwBH/edit' },
-                { label: '5. Share Public Link', href: '/share/319HqogqYEOZH11srxTM' },
-              ].map((step) => (
-                <Link
-                  key={step.label}
-                  href={step.href}
-                  className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-2.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-100/70"
-                >
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                  <span className="truncate">{step.label}</span>
-                </Link>
-              ))}
-            </div>
+              {['video', 'visuals'].includes(mode) && <label className="block"><span className="field-label">{mode === 'video' ? 'Creative brief' : 'Headline or campaign message'}</span><textarea className="field min-h-28" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={mode === 'video' ? 'Who is this for? What should they remember? Describe the story you want to tell.' : 'The message you want your audience to see.'} required maxLength={5000} /></label>}
+              {mode === 'video' && <div className="flex flex-wrap gap-4"><label><span className="field-label">Format</span><select className="field" value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)}><option>16:9</option><option>9:16</option><option>1:1</option></select></label><label><span className="field-label">Length</span><select className="field" value={durationSec} onChange={(e) => setDurationSec(Number(e.target.value))}><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>60 seconds</option></select></label></div>}
+              {mode !== 'collection' && !!workspace?.brandKits.length && <label className="block max-w-sm"><span className="field-label">Brand kit</span><select className="field" value={brandKitId} onChange={(e) => setBrandKitId(e.target.value)}><option value="">No brand kit</option>{workspace.brandKits.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</select></label>}
+              {error && <p role="alert" className="status-error">{error}</p>}
+              {mode === 'video' && capabilities?.ai === false && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">AI storyboarding needs an Azure OpenAI connection. Your administrator can configure it; capture and manual visual design are available now.</p>}
+              <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-4"><p className="flex items-center gap-2 text-[11px] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-[#798e61]" />Private draft. You decide when to publish.</p><button className="btn-primary" disabled={busy || (mode === 'video' && capabilities?.ai === false)}>{busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}{busy ? (sourceUrl ? 'Capturing your website…' : 'Creating your project…') : active.action}</button></div>
+            </form>
+            <div aria-hidden="true" className="art-grid relative hidden flex-col items-center justify-center overflow-hidden border-l border-slate-200 bg-[#edeee2] p-8 lg:flex"><div className="absolute top-6 left-6 font-mono text-[9px] text-slate-400">STUDIO / {mode.toUpperCase()}</div><div className="relative grid h-32 w-32 place-items-center rounded-full border border-slate-400"><div className="absolute inset-3 rounded-full border border-slate-300" /><active.icon size={43} strokeWidth={1} className="text-slate-700" /><span className="absolute right-1 top-3 h-4 w-4 rounded-full bg-indigo-500" /></div><p className="absolute bottom-6 left-6 right-6 font-mono text-[9px] uppercase tracking-widest text-slate-500">Create with intention.<br />Publish with confidence.</p></div>
           </div>
-
-          {/* Autonomous URL -> Brand Kit Extractor */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase text-indigo-600">
-              <Globe className="h-4 w-4" />
-              <span>Autonomous Brand Kit Extractor</span>
-            </div>
-            <p className="mt-1 text-xs text-slate-500">
-              Crawl any URL to populate all 13 Brand Kit tabs automatically.
-            </p>
-            <div className="mt-3 flex gap-2">
-              <input
-                type="text"
-                value={brandKitUrl}
-                onChange={(e) => setBrandKitUrl(e.target.value)}
-                className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-xs"
-              />
-              <button
-                type="button"
-                onClick={handleExtractBrandKit}
-                disabled={extractingBrandKit}
-                className="rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800"
-              >
-                {extractingBrandKit ? 'Crawling...' : 'Extract'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* All Seeded Projects Grid (Interactive Demos, AI Videos, AI Visuals, Collections) */}
-        <section>
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900">
-              Recent Studio Creations (whoami.genisisiq.com)
-            </h2>
-            <Link
-              href={`/workspaces/${workspaceSlug}/teams/me`}
-              className="text-xs font-semibold text-indigo-600 hover:underline"
-            >
-              Open Full Library →
-            </Link>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {/* AI Launch Videos */}
-            {videos.map((v) => (
-              <div
-                key={v.id}
-                className="group flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs hover:shadow-md transition"
-              >
-                <div className="relative h-44 bg-slate-950">
-                  <img
-                    src={v.thumbnailUrl || '/media/scene1.png'}
-                    alt={v.name}
-                    className="h-full w-full object-cover opacity-90 group-hover:scale-105 transition"
-                  />
-                  <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-violet-600/95 px-2.5 py-1 text-[10px] font-bold text-white">
-                    <Video className="h-3 w-3" /> AI Launch Video • {v.durationSec}s
-                  </span>
-                </div>
-                <div className="p-4">
-                  <h3 className="font-bold text-slate-900 text-sm truncate">{v.name}</h3>
-                  <p className="mt-1 text-xs text-slate-500 line-clamp-2">{v.prompt}</p>
-                  <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold">
-                    <Link
-                      href={`/prompt-videos/custom/${v.id}/edit`}
-                      className="text-indigo-600 hover:underline"
-                    >
-                      Open Studio & 5-Track NLE →
-                    </Link>
-                    <Link
-                      href={`/share/videos/${v.shareId}`}
-                      className="text-slate-500 hover:text-slate-900"
-                    >
-                      Share ↗
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* Interactive Demo Flows */}
-            {flows.map((f) => (
-              <div
-                key={f.id}
-                className="group flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs hover:shadow-md transition"
-              >
-                <div className="relative h-44 bg-slate-950">
-                  <img
-                    src={f.thumbnailUrl || '/media/scene1.png'}
-                    alt={f.name}
-                    className="h-full w-full object-cover opacity-90 group-hover:scale-105 transition"
-                  />
-                  <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-indigo-600/95 px-2.5 py-1 text-[10px] font-bold text-white">
-                    <Layers className="h-3 w-3" /> Interactive Demo
-                  </span>
-                </div>
-                <div className="p-4">
-                  <h3 className="font-bold text-slate-900 text-sm truncate">{f.name}</h3>
-                  <p className="mt-1 text-xs text-slate-500 line-clamp-2">{f.subtitle}</p>
-                  <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold">
-                    <Link
-                      href={`/flows/${f.id}/edit`}
-                      className="text-indigo-600 hover:underline"
-                    >
-                      Edit Flow →
-                    </Link>
-                    <div className="flex gap-3">
-                      <Link
-                        href={`/share/${f.shareId}/guide`}
-                        className="text-emerald-600 hover:underline"
-                      >
-                        Guide ↗
-                      </Link>
-                      <Link
-                        href={`/share/${f.shareId}`}
-                        className="text-slate-500 hover:text-slate-900"
-                      >
-                        Share ↗
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* AI Visual Projects */}
-            {visualProjects.map((vp) => (
-              <div
-                key={vp.id}
-                className="group flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs hover:shadow-md transition"
-              >
-                <div className="relative h-44 bg-slate-950">
-                  <img
-                    src={vp.thumbnailUrl || '/media/visual_preview.png'}
-                    alt={vp.name}
-                    className="h-full w-full object-cover opacity-90 group-hover:scale-105 transition"
-                  />
-                  <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-emerald-600/95 px-2.5 py-1 text-[10px] font-bold text-white">
-                    <ImageIcon className="h-3 w-3" /> AI Visuals (28 Presets)
-                  </span>
-                </div>
-                <div className="p-4">
-                  <h3 className="font-bold text-slate-900 text-sm truncate">{vp.name}</h3>
-                  <p className="mt-1 text-xs text-slate-500 line-clamp-2">{vp.prompt}</p>
-                  <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold">
-                    <Link
-                      href={`/visual-projects/${vp.id}/edit`}
-                      className="text-indigo-600 hover:underline"
-                    >
-                      Open Canvas Editor →
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* Collections */}
-            {collections.map((c) => (
-              <div
-                key={c.id}
-                className="group flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs hover:shadow-md transition"
-              >
-                <div className="relative h-44 bg-gradient-to-br from-slate-900 via-indigo-950 to-amber-700 p-5 flex items-end text-white">
-                  <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-slate-950">
-                    Collection Showcase
-                  </span>
-                  <div className="font-bold text-base">{c.name}</div>
-                </div>
-                <div className="p-4">
-                  <p className="text-xs text-slate-500">
-                    Multi-asset showcase hub combining interactive demos and AI launch videos.
-                  </p>
-                  <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold">
-                    <Link
-                      href={`/collections/${c.id}/edit`}
-                      className="text-indigo-600 hover:underline"
-                    >
-                      Edit Collection →
-                    </Link>
-                    <Link
-                      href={`/share/collections/${c.shareId}`}
-                      className="text-slate-500 hover:text-slate-900"
-                    >
-                      Public Hub ↗
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+        </section>}
+        <section aria-labelledby="projects-title">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-4"><div><p className="eyebrow">02 / In the studio</p><h2 id="projects-title" className="mt-2 text-xl font-semibold tracking-tight">Your work, in motion.</h2></div><div className="flex flex-wrap gap-1">{['all', ...modes.map((m) => m.id)].map((f) => <button key={f} onClick={() => setFilter(f)} aria-pressed={filter === f} className={`rounded-full px-3 py-1.5 text-xs ${filter === f ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-200'}`}>{f === 'all' ? 'All projects' : modes.find((m) => m.id === f)?.short}</button>)}</div></div>
+          {!assets.filter((a) => filter === 'all' || a.type === filter).length ? <div className="empty-state"><Aperture size={32} strokeWidth={1} className="text-slate-400" /><h3 className="text-base font-medium text-slate-800">A clean slate. A clear direction.</h3><p>No {filter === 'all' ? 'projects' : modes.find((m) => m.id === filter)?.short.toLowerCase() + ' projects'} yet. {canEdit ? 'Start your first story above.' : 'Your team’s projects will appear here.'}</p>{canEdit && <a href="#create" className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-indigo-600"><Plus size={14} />Create your first project</a>}</div> : <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{assets.filter((a) => filter === 'all' || a.type === filter).slice(0, 12).map((asset) => <Link key={asset.id} href={asset.href} className="group overflow-hidden rounded-xl border border-slate-200 bg-[#fdfcf7] transition hover:-translate-y-1 hover:border-slate-400"><div className="asset-preview relative">{asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" loading="lazy" /> : <asset.icon size={36} strokeWidth={1} className="text-slate-400" />}<span className="absolute left-3 top-3 rounded bg-[#fdfcf7]/95 px-2 py-1 font-mono text-[9px] uppercase tracking-widest text-slate-600">{asset.status.toLowerCase()}</span></div><div className="p-5"><div className="flex justify-between gap-3"><h3 className="truncate text-sm font-semibold">{asset.name}</h3><ArrowUpRight size={16} className="shrink-0 text-slate-400 transition group-hover:text-indigo-600" /></div><div className="mt-3 flex items-center justify-between text-[10px] text-slate-500"><span>{asset.label}</span><time dateTime={asset.updatedAt}>{new Date(asset.updatedAt).toLocaleDateString()}</time></div></div></Link>)}</div>}
+        </section>
+        <section className="grid gap-5 border-t border-slate-300 pt-8 lg:grid-cols-[1fr_1fr]">
+          <div><p className="eyebrow">03 / A consistent point of view</p><h2 className="mt-3 text-2xl font-medium tracking-tight">Your brand.<br />Not a template.</h2><p className="page-intro max-w-sm">Extract the colors, typography and imagery already on your website. Refine them once, keep your work consistent.</p><Link href={`${base}/settings/brand-kits`} className="mt-4 inline-flex items-center gap-2 text-xs font-semibold text-indigo-600"><Palette size={14} />{workspace?.brandKits.length ? `${workspace.brandKits.length} brand kit${workspace.brandKits.length === 1 ? '' : 's'}` : 'Manage brand kits'}<ArrowUpRight size={13} /></Link></div>
+          {canEdit && <form onSubmit={extract} className="panel self-start"><label><span className="field-label flex items-center gap-2"><Globe size={14} />Start with your website</span><input className="field" type="url" required value={brandUrl} onChange={(e) => setBrandUrl(e.target.value)} placeholder="https://your-product.com" /></label>{brandError && <p className="status-error mt-3" role="alert">{brandError}</p>}<button disabled={extracting} className="btn-secondary mt-4 w-full">{extracting ? <Loader2 size={14} className="animate-spin" /> : <Palette size={14} />}{extracting ? 'Extracting brand…' : 'Extract brand kit'}</button><p className="mt-3 text-[10px] text-slate-500">Only capture websites you own or have permission to use.</p></form>}
         </section>
       </div>
     </WorkspaceShell>

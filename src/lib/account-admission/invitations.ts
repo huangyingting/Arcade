@@ -29,11 +29,11 @@ export type PublicInvitationView = {
 function invitationExpiry(now: Date, requested?: Date): Date {
   const expiresAt =
     requested ?? new Date(now.getTime() + DEFAULT_INVITATION_TTL_MS);
-  if (expiresAt.getTime() <= now.getTime()) {
+  if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= now.getTime() || expiresAt.getTime() > now.getTime() + 30 * 86400000) {
     throw new AccountAdmissionError(
       400,
       'invalid_expiry',
-      'Invitation expiry must be in the future.'
+      'Invitation expiry must be within the next 30 days.'
     );
   }
   return expiresAt;
@@ -123,40 +123,21 @@ export async function createAccountInvitation(
       );
     }
 
-    let inviterId = input.invitedById;
-    if (!inviterId) {
-      const adminUser = await prisma.user.findFirst();
-      inviterId = adminUser?.id;
-    }
-
     const invitation = await prisma.accountInvitation.create({
       data: {
         email: input.email.trim(),
         normalizedEmail,
         activeForEmail: normalizedEmail,
         tokenHash,
-        invitedById: inviterId || null,
+        invitedById: input.invitedById || null,
         expiresAt,
-      },
-    });
-
-    await prisma.accountEmailOutbox.create({
-      data: {
-        invitationId: invitation.id,
-        payload: JSON.stringify({
-          type: 'account_invitation',
-          email: invitation.email,
-          expiresAt: invitation.expiresAt.toISOString(),
-        }),
-        status: 'pending',
-        expiresAt: invitation.expiresAt,
       },
     });
 
     return {
       invitation,
       token,
-      delivery: { queued: true },
+      delivery: { queued: false, reason: 'Share this one-time invitation link directly with the recipient.' },
     };
   } catch (error) {
     if (isUniqueConflict(error)) {
@@ -279,7 +260,7 @@ export async function rotateAccountInvitation(
   return {
     invitation: updated,
     token,
-    delivery: { queued: true },
+    delivery: { queued: false, reason: 'Share the new invitation link directly. The previous link is invalid.' },
   };
 }
 

@@ -1,31 +1,18 @@
+import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
-import {
-  accountAdmissionSecretLink,
-  requestPasswordReset,
-} from '@/lib/account-admission';
+import { accountAdmissionSecretLink, requestPasswordReset } from '@/lib/account-admission';
+import { api, body, text, throttle } from '@/lib/api';
+import { requireEmailDelivery, sendEmail } from '@/lib/email';
 
-export async function POST(request: Request) {
-  try {
-    const body = await request.json().catch(() => ({}));
-    const email = String(body.email || '').trim();
-    const reset = await requestPasswordReset(email);
-    const resetUrl = reset
-      ? accountAdmissionSecretLink('/reset-password', reset.token, request.url)
-      : null;
-
-    return NextResponse.json(
-      {
-        ok: true,
-        message:
-          'If a password account exists for this email, a reset link has been generated.',
-        resetUrl,
-      },
-      { status: 202 }
-    );
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message || 'Password reset request failed.' },
-      { status: err?.status || 400 }
-    );
-  }
-}
+export const POST = api(async (request) => {
+  requireEmailDelivery();
+  const input = await body(request);
+  const email = text(input.email, 'Email', 254).toLowerCase();
+  await throttle(`recovery:${createHash('sha256').update(email).digest('hex')}`, 3, 3600);
+  const reset = await requestPasswordReset(email);
+  if (reset) await sendEmail({
+    to: reset.email, subject: 'Reset your Arcade password',
+    text: `Use this one-time link within one hour to reset your password:\n${accountAdmissionSecretLink('/reset-password', reset.token, request.url)}\n\nIf you did not request this, ignore this email.`,
+  });
+  return NextResponse.json({ ok: true, message: 'If an account exists, a password reset email has been sent.' }, { status: 202 });
+});

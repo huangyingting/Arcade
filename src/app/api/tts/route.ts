@@ -1,27 +1,16 @@
 import { NextResponse } from 'next/server';
+import { api, body, text, throttle, workspaceAccess } from '@/lib/api';
 import { synthesizeSpeechAudio } from '@/lib/production-engine/ai-provider';
+import { withWorkspaceStorage } from '@/lib/production-engine/storage';
 
-export async function POST(request: Request) {
-  try {
-    const body = await request.json().catch(() => ({}));
-    const rawScript = body.script || 'Welcome to Arcade interactive product studio.';
-    const voiceId = body.voiceId || 'ava-natural';
-    const pronunciations = body.pronunciations || [];
-    const locale = body.locale || undefined;
-
-    const result = await synthesizeSpeechAudio(rawScript, voiceId, pronunciations, locale);
-    return NextResponse.json({
-      ok: true,
-      ...result,
-      voiceId,
-    });
-  } catch {
-    return NextResponse.json({
-      ok: true,
-      audioUrl: '/media/voiceover-sample.wav',
-      processedScript: '',
-      durationSec: 4,
-      provider: 'fallback',
-    });
-  }
-}
+export const POST = api(async (request) => {
+  const input = await body(request);
+  const { workspace, user } = await workspaceAccess(text(input.workspaceSlug, 'Workspace', 100), true);
+  await throttle(`tts:${user.id}`, 30, 3600);
+  const rules: { word: string; replacement: string }[] = JSON.parse(workspace.pronunciationRulesJson);
+  const result = await withWorkspaceStorage(workspace.id, () => synthesizeSpeechAudio(
+    text(input.script, 'Narration script', 10000), text(input.voiceId ?? 'ava-natural', 'Voice', 100),
+    rules, input.locale ? text(input.locale, 'Language', 30) : undefined,
+  ));
+  return NextResponse.json({ ...result, ok: true });
+});

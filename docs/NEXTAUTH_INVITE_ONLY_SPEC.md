@@ -1,5 +1,7 @@
 # Unified Design Specification: NextAuth + Invite-Only Account Admission Module
 
+> Historical research. Arcade now always enforces invitation-only admission, uses database sessions, and exposes no HTTP bootstrap endpoint. Current deployment contract: [Production operations](05_PRODUCTION_OPERATIONS.md).
+
 **Status:** Canonical Reference Specification  
 **Scope:** Cross-repository standard for all `/home/azadmin/*` Next.js + NextAuth + Prisma applications (`ReadWise`, `clueso`, `HelloInterview`, `Arcade`, `readwise.io`, `UniLink`, `Visdom`, `TextIQ`)
 
@@ -275,4 +277,3 @@ All repositories under `/home/azadmin` using the `AccountInvitation` + `NextAuth
 | **`/home/azadmin/UniLink`** | Aligned (`lib/auth/account-admission.ts` + `lib/auth/admin-bootstrap.ts`) | Aligned (`authorizeAccountSignIn` + `createAdmittedUser`) | Aligned (`scripts/bootstrap-admin.ts`) | Aligned (`ClosedTestInvitation`) |
 | **`/home/azadmin/Visdom`** | Aligned (`lib/invite.ts`, `lib/signup.ts`, `lib/pending-signup.ts`) | Aligned (`PendingSignup` OAuth gate + `microsoftEmailTrusted`) | Aligned (`scripts/seed-admin.ts` / `npm run bootstrap:admin`) | Aligned (`/admin/invites`, `/finish-signup`) |
 | **`/home/azadmin/TextIQ`** | Aligned (`src/lib/invite-access.ts`, `src/lib/workspace/invite-service.ts`) | Aligned (`evaluateInviteAccess`) | Aligned (CLI seed / Workspace Owner authority) | Aligned (`/app/join/[token]`) |
-

@@ -1,17 +1,14 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
-import { SESSION_COOKIES, SESSION_COOKIE_NAME } from '@/lib/account-admission';
+import { SESSION_COOKIES } from '@/lib/account-admission/session';
+import { api } from '@/lib/api';
 
-export async function POST() {
-  const cookieStore = await cookies();
-  for (const name of SESSION_COOKIES) {
-    const token = cookieStore.get(name)?.value;
-    if (token) {
-      await prisma.session.deleteMany({ where: { sessionToken: token } });
-    }
-  }
+export const POST = api(async () => {
+  const jar = await cookies();
+  const tokens = SESSION_COOKIES.map((name) => jar.get(name)?.value).filter((token): token is string => Boolean(token));
+  if (tokens.length) await prisma.session.deleteMany({ where: { sessionToken: { in: tokens } } });
   const response = NextResponse.json({ ok: true });
-  response.cookies.delete(SESSION_COOKIE_NAME);
+  for (const name of [...SESSION_COOKIES, 'ArcadeApp.AuthUserTokens']) response.cookies.delete(name);
   return response;
-}
+});

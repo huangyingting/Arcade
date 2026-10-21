@@ -1,97 +1,38 @@
 import type { NextAuthOptions } from 'next-auth';
 import type { Adapter } from 'next-auth/adapters';
 import { PrismaAdapter } from '@auth/prisma-adapter';
-import CredentialsProvider from 'next-auth/providers/credentials';
+import GoogleProvider from 'next-auth/providers/google';
 import { prisma } from './prisma';
-import {
-  authorizeSocialSignIn,
-  normalizeAccountEmail,
-  verifyPassword,
-} from './account-admission';
+import { authorizeSocialSignIn } from './account-admission/social';
+import { SESSION_MAX_AGE_SECONDS, SESSION_UPDATE_AGE_SECONDS } from './account-admission/session';
+import { SESSION_COOKIE_OPTIONS } from './account-admission/session';
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma) as Adapter,
-  session: {
-    strategy: 'jwt',
-  },
-  pages: {
-    signIn: '/auth',
-  },
-  providers: [
-    CredentialsProvider({
-      name: 'Credentials',
-      credentials: {
-        email: { label: 'Email', type: 'email', placeholder: 'wlfjck@gmail.com' },
-        password: { label: 'Password', type: 'password' },
-      },
-      async authorize(credentials) {
-        const email = normalizeAccountEmail(credentials?.email || 'wlfjck@gmail.com');
-        const user = await prisma.user.findUnique({
-          where: { email },
-          include: { passwordCredential: true },
-        });
-
-        if (!user) {
-          return null;
-        }
-
-        const storedHash =
-          user.passwordCredential?.passwordHash || user.passwordHash || null;
-        if (credentials?.password && storedHash) {
-          const valid = await verifyPassword(credentials.password, storedHash);
-          if (!valid && credentials.password !== storedHash) {
-            return null;
-          }
-        }
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          image: user.image,
-          role: user.role,
-        };
-      },
-    }),
-  ],
+  session: { strategy: 'database', maxAge: SESSION_MAX_AGE_SECONDS, updateAge: SESSION_UPDATE_AGE_SECONDS },
+  pages: { signIn: '/auth', error: '/auth' },
+  providers: process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? [
+    GoogleProvider({ clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET }),
+  ] : [],
   callbacks: {
     async signIn({ user, account, profile }) {
-      if (!account || account.provider === 'credentials') {
-        return true;
-      }
+      if (!account) return false;
       return authorizeSocialSignIn({
-        provider: account.provider,
-        providerAccountId: account.providerAccountId,
-        type: account.type,
-        accessToken: account.access_token,
-        refreshToken: account.refresh_token,
-        expiresAt: account.expires_at,
-        tokenType: account.token_type,
-        scope: account.scope,
-        idToken: account.id_token,
-        sessionState: account.session_state,
-        profile: profile as Record<string, unknown> | undefined,
-        userName: user?.name,
-        userImage: user?.image,
+        provider: account.provider, providerAccountId: account.providerAccountId,
+        type: account.type, accessToken: account.access_token,
+        refreshToken: account.refresh_token, expiresAt: account.expires_at,
+        tokenType: account.token_type, scope: account.scope, idToken: account.id_token,
+        sessionState: account.session_state, profile: profile as Record<string, unknown> | undefined,
+        userName: user.name, userImage: user.image,
       });
     },
-    async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-        token.email = user.email;
-        token.name = user.name;
-        token.role = (user as { role?: string }).role || 'Admin';
-      }
-      return token;
-    },
-    async session({ session, token }) {
+    async session({ session, user }) {
       if (session.user) {
-        (session.user as { id?: string; role?: string }).id =
-          (token.id as string) || 'u_jack_wolf';
-        (session.user as { role?: string }).role = (token.role as string) || 'Admin';
+        Object.assign(session.user, { id: user.id, role: (user as { role?: string }).role });
       }
       return session;
     },
   },
-  secret: process.env.NEXTAUTH_SECRET || 'arcade-super-secret-nextauth-key-2026-clone',
+  secret: process.env.NEXTAUTH_SECRET,
+  useSecureCookies: SESSION_COOKIE_OPTIONS.secure,
 };

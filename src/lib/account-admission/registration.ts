@@ -7,9 +7,7 @@ import {
   normalizeAccountEmail,
 } from './policy';
 import { createDatabaseSession } from './session';
-import { createOpaqueToken, hashOpaqueToken } from './tokens';
-
-const PUBLIC_REGISTRATION_TTL_MS = 24 * 60 * 60 * 1000;
+import { hashOpaqueToken } from './tokens';
 
 export type RegistrationInput = {
   email: string;
@@ -65,8 +63,8 @@ export async function registerWithInvitation(
   }
 
   if (invitation.expiresAt <= now) {
-    await prisma.accountInvitation.update({
-      where: { id: invitation.id },
+    await prisma.accountInvitation.updateMany({
+      where: { id: invitation.id, tokenHash, status: 'PENDING', expiresAt: { lte: now } },
       data: {
         status: 'EXPIRED',
         activeForEmail: null,
@@ -100,89 +98,27 @@ export async function registerWithInvitation(
     );
   }
 
-  const defaultWorkspace = await prisma.workspace.findFirst({
-    orderBy: { createdAt: 'asc' },
-  });
-
-  const user = await prisma.user.create({
+  const user = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.accountInvitation.updateMany({
+      where: { id: invitation.id, status: 'PENDING', tokenHash, expiresAt: { gt: now } },
+      data: { status: 'ACCEPTED', acceptedAt: now, activeForEmail: null, tokenHash: null },
+    });
+    if (!claimed.count) throw new AccountAdmissionError(410, 'invalid_invitation', 'This invitation is no longer active.');
+    const created = await tx.user.create({
     data: {
       email: normalizedEmail,
       emailVerified: now,
       name: normalizedName(input.name),
       role: 'Creator',
-      passwordHash,
       passwordCredential: {
         create: { passwordHash, passwordChangedAt: now },
       },
     },
-  });
-
-  if (defaultWorkspace) {
-    await prisma.workspaceMember.create({
-      data: {
-        workspaceId: defaultWorkspace.id,
-        userId: user.id,
-        role: 'CREATOR',
-      },
     });
-  }
-
-  await prisma.accountInvitation.update({
-    where: { id: invitation.id },
-    data: {
-      status: 'ACCEPTED',
-      acceptedById: user.id,
-      acceptedAt: now,
-      activeForEmail: null,
-      tokenHash: null,
-    },
+    await tx.accountInvitation.update({ where: { id: invitation.id }, data: { acceptedById: created.id } });
+    return created;
   });
 
   const session = await createDatabaseSession(user.id, now);
-  return { user, session, workspaceSlug: defaultWorkspace?.slug || 'workspace-5p8xcsfv' };
-}
-
-export async function beginPublicRegistration(input: RegistrationInput) {
-  if (accountAdmissionMode() !== 'public') {
-    throw new AccountAdmissionError(
-      403,
-      'invitation_required',
-      'An invitation is required to create an account.'
-    );
-  }
-
-  const normalizedEmail = registrationEmail(input.email);
-  const passwordHash = await hashPassword(input.password);
-  const token = createOpaqueToken();
-  const tokenHash = hashOpaqueToken(token);
-  const expiresAt = new Date(Date.now() + PUBLIC_REGISTRATION_TTL_MS);
-
-  const existing = await prisma.user.findUnique({
-    where: { email: normalizedEmail },
-    select: { id: true },
-  });
-  if (existing) {
-    return { token: null, email: null, expiresAt };
-  }
-
-  await prisma.pendingRegistration.upsert({
-    where: { normalizedEmail },
-    create: {
-      email: input.email.trim(),
-      normalizedEmail,
-      name: normalizedName(input.name),
-      passwordHash,
-      tokenHash,
-      expiresAt,
-    },
-    update: {
-      email: input.email.trim(),
-      name: normalizedName(input.name),
-      passwordHash,
-      tokenHash,
-      expiresAt,
-    },
-  });
-
-  return { token, email: normalizedEmail, expiresAt };
+  return { user, session };
 }

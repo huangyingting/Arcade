@@ -46,7 +46,7 @@ export async function bootstrapAdmin(input: {
           where: { id: existing.id },
           data: {
             name: displayName,
-            passwordHash,
+            passwordHash: null,
             role: 'Admin',
             emailVerified: existing.emailVerified ?? now,
           },
@@ -55,7 +55,7 @@ export async function bootstrapAdmin(input: {
           data: {
             email,
             name: displayName,
-            passwordHash,
+            passwordHash: null,
             role: 'Admin',
             emailVerified: now,
           },
@@ -75,6 +75,7 @@ export async function bootstrapAdmin(input: {
         resetExpiresAt: null,
       },
     });
+    await tx.session.deleteMany({ where: { userId: user.id } });
 
     return {
       user,

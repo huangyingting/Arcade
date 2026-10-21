@@ -45,7 +45,7 @@ const schema =
 export default defineConfig({
   schema,
   migrations: {
-    path: join(dirname(schema), 'migrations'),
+    path: join(dirname(schema), 'migrations', schema.endsWith('.postgres.prisma') ? 'postgresql' : 'sqlite'),
   },
   datasource: {
     url: resolveDatabaseUrl(

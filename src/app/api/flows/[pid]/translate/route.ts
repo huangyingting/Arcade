@@ -1,95 +1,33 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { callAzureOpenAiJson, synthesizeSpeechAudio } from '@/lib/production-engine/ai-provider';
+import { api, body, HttpError, text, throttle } from '@/lib/api';
+import { flowAccess } from '@/lib/assets';
+import { callAzureOpenAiJson } from '@/lib/production-engine/ai-provider';
+import { TRANSLATION_LOCALES, type FlowStep } from '@/types/domain';
 
-const LOCALE_LABELS: Record<string, { label: string; prefix: string }> = {
-  en: { label: 'English (US)', prefix: '[EN]' },
-  'zh-CN': { label: 'Chinese Simplified (简体中文)', prefix: '[ZH]' },
-  'zh-TW': { label: 'Chinese Traditional (繁體中文)', prefix: '[ZH-TW]' },
-  ja: { label: 'Japanese (日本語)', prefix: '[JA]' },
-  ko: { label: 'Korean (한국어)', prefix: '[KO]' },
-  es: { label: 'Spanish (Español)', prefix: '[ES]' },
-  fr: { label: 'French (Français)', prefix: '[FR]' },
-  de: { label: 'German (Deutsch)', prefix: '[DE]' },
-  pt: { label: 'Portuguese (Português)', prefix: '[PT]' },
-};
-
-export async function POST(
-  request: Request,
-  { params: rawParams }: { params: Promise<{ pid: string }> }
-) {
-  const params = await rawParams;
-  const body = await request.json().catch(() => ({}));
-  const locale = body.locale || 'zh-CN';
-  const meta = LOCALE_LABELS[locale] || { label: locale, prefix: `[${locale.toUpperCase()}]` };
-
-  const flow = await prisma.flow.findFirst({
-    where: { OR: [{ id: params.pid }, { shareId: params.pid }] },
-  });
-  if (!flow) {
-    return NextResponse.json({ error: 'Flow not found' }, { status: 404 });
-  }
-
-  const steps = JSON.parse(flow.stepsJson || '[]');
-  const sampleSteps = steps.map((s: any) => ({
-    id: s.id,
-    title: s.title,
-    callout: s.hotspots?.[0]?.tooltipText || '',
-    voiceoverText: s.voiceover?.script || s.title || '',
-  }));
-
-  const aiTranslation = await callAzureOpenAiJson<{
-    translatedFlowName: string;
-    translatedSteps: Array<{ id?: string; title: string; callout: string; voiceoverText: string }>;
-  }>(
-    `Translate the interactive product demo title, step titles, hotspot callout tooltips, and voiceover narration scripts into natural, native ${meta.label} (locale code: ${locale}). Return JSON {"translatedFlowName": "...", "translatedSteps": [{"title": "...", "callout": "...", "voiceoverText": "..."}]} with the exact same number of steps (${sampleSteps.length}).`,
-    JSON.stringify({ flowName: flow.name, steps: sampleSteps }),
-    {
-      translatedFlowName: `${meta.prefix} ${flow.name}`,
-      translatedSteps: sampleSteps,
-    }
+export const POST = api<{ params: Promise<{ pid: string }> }>(async (request, { params }) => {
+  const { asset, user } = await flowAccess((await params).pid, true);
+  await throttle(`ai:${user.id}`, 30, 3600);
+  const input = await body(request);
+  const locale = text(input.locale, 'Language', 30);
+  if (!['en', ...TRANSLATION_LOCALES.map((l) => l.code)].includes(locale)) throw new HttpError(400, 'Unsupported language.');
+  const steps: FlowStep[] = JSON.parse(asset.stepsJson);
+  const result = await callAzureOpenAiJson<{ name: string; steps: { title: string; tooltips: string[]; callouts: { title: string; body: string }[]; chapter?: { title: string; subtitle: string }; voiceoverText: string }[] }>(
+    `Translate into ${locale}. Preserve IDs, links, and factual claims. Return JSON {"name":"...","steps":[{"title":"...","tooltips":["..."],"callouts":[{"title":"...","body":"..."}],"chapter":{"title":"...","subtitle":"..."},"voiceoverText":"..."}]}. Keep exactly the same number and order of steps, tooltips and callouts.`,
+    JSON.stringify({ name: asset.name, steps: steps.map((s) => ({ title: s.title, tooltips: s.hotspots.map((h) => h.tooltipText), callouts: s.callouts.map(({ title, body }) => ({ title, body })), chapter: s.chapter ? { title: s.chapter.title, subtitle: s.chapter.subtitle } : undefined, voiceoverText: s.voiceover.script })) }),
+    { name: '', steps: [] },
   );
-
-  const normalizedSteps = sampleSteps.map((orig: any, idx: number) => {
-    const t = aiTranslation.data.translatedSteps?.[idx];
-    return {
-      id: orig.id,
-      title: t?.title || `${meta.prefix} ${orig.title}`,
-      callout: t?.callout || orig.callout,
-      tooltip: t?.callout || orig.callout,
-      voiceoverText: t?.voiceoverText || orig.voiceoverText,
-    };
-  });
-
-  // Synthesize native neural audio for the first step in the target language
-  const firstScript = normalizedSteps[0]?.voiceoverText || aiTranslation.data.translatedFlowName || flow.name;
-  const tts = await synthesizeSpeechAudio(firstScript, 'ava-natural', [], locale);
-
-  const translations = JSON.parse(flow.translationsJson || '{}');
-  translations[locale] = {
-    name: aiTranslation.data.translatedFlowName || `${meta.prefix} ${flow.name}`,
-    localeLabel: meta.label,
-    steps: normalizedSteps,
-    translatedSteps: normalizedSteps,
-    audioUrl: tts.audioUrl,
-    neuralVoice: tts.neuralVoice,
-    provider: aiTranslation.provider,
-    status: 'Synced',
-    updatedAt: new Date().toISOString(),
-  };
-
-  const updated = await prisma.flow.update({
-    where: { id: flow.id },
-    data: { translationsJson: JSON.stringify(translations) },
-  });
-
-  return NextResponse.json({
-    ok: true,
-    translations,
-    flow: updated,
-    aiProvider: aiTranslation.provider,
-    aiModel: aiTranslation.model,
-    ttsAudioUrl: tts.audioUrl,
-    ttsNeuralVoice: tts.neuralVoice,
-  });
-}
+  if (result.data.steps?.length !== steps.length) throw new HttpError(502, 'The translation did not include every step.');
+  for (const [index, translated] of result.data.steps.entries()) {
+    text(translated.title, 'Translated step title', 300);
+    text(translated.voiceoverText, 'Translated narration', 10000, false);
+    if (!Array.isArray(translated.tooltips) || translated.tooltips.length !== steps[index].hotspots.length || !Array.isArray(translated.callouts) || translated.callouts.length !== steps[index].callouts.length) throw new HttpError(502, 'The translation did not preserve every annotation.');
+    for (const tooltip of translated.tooltips) text(tooltip, 'Translated tooltip', 1000, false);
+    for (const callout of translated.callouts) { text(callout.title, 'Translated callout title', 300, false); text(callout.body, 'Translated callout copy', 2000, false); }
+    if (steps[index].chapter) { text(translated.chapter?.title, 'Translated chapter title', 300); text(translated.chapter?.subtitle, 'Translated chapter copy', 2000, false); }
+  }
+  const translations = JSON.parse(asset.translationsJson);
+  translations[locale] = { name: text(result.data.name, 'Translated title', 300), steps: result.data.steps, updatedAt: new Date().toISOString(), provider: result.provider };
+  const flow = await prisma.flow.update({ where: { id: asset.id }, data: { translationsJson: JSON.stringify(translations) } });
+  return NextResponse.json({ flow, translations });
+});

@@ -1,793 +1,279 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import {
-  Settings,
-  CreditCard,
-  Users,
-  Shield,
-  EyeOff,
-  Plug,
-  Languages,
-  Volume2,
-  Mic,
-  Sliders,
-  Palette,
-  Save,
-  Check,
-  KeyRound,
-  Plus,
-  Trash2,
-  Play,
-  ExternalLink,
-} from 'lucide-react';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
 import { ELEVENLABS_VOICES, TRANSLATION_LOCALES } from '@/types/domain';
 
-const SETTINGS_SECTIONS = [
-  { id: 'general', label: 'General', icon: Settings },
-  { id: 'billing', label: 'Billing & Plan', icon: CreditCard },
-  { id: 'members', label: 'Members & Invites', icon: Users },
-  { id: 'brand-kits', label: 'Brand Kits (13-Tab)', icon: Palette },
-  { id: 'security', label: 'Security & SSO', icon: Shield },
-  { id: 'privacy', label: 'Viewer Privacy', icon: EyeOff },
-  { id: 'integrations', label: 'Integrations', icon: Plug },
-  { id: 'translations', label: 'Translations (36)', icon: Languages },
-  { id: 'pronunciation', label: 'Pronunciation', icon: Volume2 },
-  { id: 'synthetic-voices', label: 'Synthetic Voices', icon: Mic },
-  { id: 'advanced', label: 'Advanced', icon: Sliders },
-] as const;
+const sections = [
+  ['general', 'General'], ['members', 'Members'], ['brand-kits', 'Brand kits'],
+  ['billing', 'Plan & usage'], ['security', 'Security'], ['privacy', 'Privacy preferences'],
+  ['integrations', 'Integrations'], ['translations', 'Languages'], ['pronunciation', 'Pronunciation'],
+  ['synthetic-voices', 'Voice previews'], ['advanced', 'Export preferences'],
+];
+type Rule = { id: string; word: string; replacement: string };
+type MemberRole = 'ADMIN' | 'EDITOR' | 'VIEWER';
+type Member = { id: string; role: string; user: { id: string; name: string | null; email: string | null } };
+type Config = Record<string, any>;
+type Workspace = {
+  slug: string; name: string; role: string; planTier: string;
+  monthlyCreditsQuota: number; bonusCreditsBalance: number; usedCreditsThisCycle: number;
+  privacySettingsJson: string; translationSettingsJson: string; advancedSettingsJson: string; pronunciationRulesJson: string;
+  members: Member[];
+  brandKits: Array<{ id: string; name: string; sourceUrl?: string; status: string }>;
+};
+function parse<T,>(value: string | undefined, fallback: T): T {
+  try { return value ? JSON.parse(value) ?? fallback : fallback; } catch { return fallback; }
+}
 
-export default function WorkspaceSettingsSectionPage({
-  params: rawParams,
-}: {
-  params: Promise<{ workspaceSlug: string; section: string }>;
-}) {
-  const { workspaceSlug, section } = React.use(rawParams);
-  const [workspace, setWorkspace] = useState<any>(null);
-  const [wsName, setWsName] = useState("jack wolf's workspace");
-  const [wsSlugInput, setWsSlugInput] = useState(workspaceSlug);
-
-  // Pronunciation dictionary
-  const [pronRules, setPronRules] = useState<Array<{ id: string; word: string; replacement: string }>>([
-    { id: 'pr1', word: 'SC-100', replacement: 'S C One Hundred' },
-    { id: 'pr2', word: 'genisisiq', replacement: 'Genesis I Q' },
-    { id: 'pr3', word: 'AZ-305', replacement: 'A Z Three Oh Five' },
-  ]);
-  const [newWord, setNewWord] = useState('');
-  const [newReplacement, setNewReplacement] = useState('');
-
-  // Security & SSO state
-  const [securityConfig, setSecurityConfig] = useState({
-    enforceInviteOnly: true,
-    samlEnabled: false,
-    idpEntityId: 'https://sts.windows.net/whoami-genisisiq/',
-    ssoLoginUrl: 'https://login.microsoftonline.com/whoami-genisisiq/saml2',
-    scimProvisioning: true,
-    sessionTimeoutHours: 24,
-  });
-
-  // Viewer Privacy state
-  const [privacyConfig, setPrivacyConfig] = useState({
-    cookielessAnalytics: false,
-    anonymizeViewerIp: true,
-    autoRedactEmailsInDom: true,
-    euGdprDataResidency: true,
-    allowSearchEngineIndexing: true,
-  });
-
-  // Translations state
-  const [translationConfig, setTranslationConfig] = useState({
-    defaultLocale: 'en',
-    autoDetectBrowserLocale: true,
-    translateVoiceoverAudio: true,
-    enabledLocales: ['en', 'zh-CN', 'ja', 'de', 'fr', 'es', 'ko', 'pt-BR'],
-  });
-
-  // Advanced state
-  const [advancedConfig, setAdvancedConfig] = useState({
-    customCnameDomain: 'demos.genisisiq.com',
-    webhookUrl: 'https://whoami.genisisiq.com/api/webhooks/arcade',
-    defaultExportFps: 60,
-    defaultExportResolution: '1080p',
-    enableHtmlPageMorphing: true,
-  });
-
-  // Synthetic Voice Preview state
-  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  const [saved, setSaved] = useState(false);
+export default function WorkspaceSettingsPage({ params }: { params: Promise<{ workspaceSlug: string; section: string }> }) {
+  const { workspaceSlug, section } = use(params);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [platformAdmin, setPlatformAdmin] = useState(false);
+  const [name, setName] = useState('');
+  const [privacy, setPrivacy] = useState<Config>({});
+  const [translations, setTranslations] = useState<Config>({});
+  const [advanced, setAdvanced] = useState<Config>({});
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [word, setWord] = useState('');
+  const [replacement, setReplacement] = useState('');
+  const [brandUrl, setBrandUrl] = useState('');
+  const [pending, setPending] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [playing, setPlaying] = useState<string | null>(null);
+  const [speechAvailable, setSpeechAvailable] = useState<boolean | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [memberEmail, setMemberEmail] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState<MemberRole>('VIEWER');
+  const [memberRoles, setMemberRoles] = useState<Record<string, MemberRole>>({});
+  const [removeMemberId, setRemoveMemberId] = useState<string | null>(null);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const canManage = workspace?.role === 'OWNER' || workspace?.role === 'ADMIN';
+  const readOnly = !canManage || pending;
 
   useEffect(() => {
-    fetch(`/api/workspaces/${workspaceSlug}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.workspace) {
+    let active = true;
+    setLoading(true); setError(''); setWorkspace(null); setCurrentUserId(null);
+    setMemberRoles({}); setRemoveMemberId(null); setMemberEmail(''); setNewMemberRole('VIEWER');
+    void (async () => {
+      try {
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceSlug)}`);
+        const data = await response.json();
+        if (!response.ok || !data.workspace) throw new Error(data.error || 'Unable to load workspace settings.');
+        if (active) {
           const ws = data.workspace;
-          setWorkspace(ws);
-          setWsName(ws.name);
-          setWsSlugInput(ws.slug);
-          try {
-            const parsedPron = JSON.parse(ws.pronunciationRulesJson || '[]');
-            if (parsedPron.length) setPronRules(parsedPron);
-          } catch {}
-          try {
-            const parsedPriv = JSON.parse(ws.privacySettingsJson || '{}');
-            if (Object.keys(parsedPriv).length) setPrivacyConfig((p) => ({ ...p, ...parsedPriv }));
-          } catch {}
-          try {
-            const parsedTrans = JSON.parse(ws.translationSettingsJson || '{}');
-            if (Object.keys(parsedTrans).length) setTranslationConfig((p) => ({ ...p, ...parsedTrans }));
-          } catch {}
-          try {
-            const parsedAdv = JSON.parse(ws.advancedSettingsJson || '{}');
-            if (Object.keys(parsedAdv).length) {
-              setAdvancedConfig((p) => ({ ...p, ...parsedAdv }));
-              if (parsedAdv.securityConfig) {
-                setSecurityConfig((s) => ({ ...s, ...parsedAdv.securityConfig }));
-              }
-            }
-          } catch {}
+          setWorkspace(ws); setName(ws.name);
+          setCurrentUserId(data.user?.id || null);
+          setPrivacy(parse(ws.privacySettingsJson, {}));
+          setTranslations(parse(ws.translationSettingsJson, {}));
+          setAdvanced(parse(ws.advancedSettingsJson, {}));
+          setRules(parse(ws.pronunciationRulesJson, []));
         }
-      });
-  }, [workspaceSlug]);
-
-  async function saveWorkspacePatch(patch: Record<string, unknown>) {
-    const res = await fetch(`/api/workspaces/${workspaceSlug}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    });
-    const data = await res.json();
-    if (data.workspace) setWorkspace(data.workspace);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  }
-
-  async function previewSyntheticVoice(voiceId: string, voiceName: string) {
-    setPlayingVoiceId(voiceId);
-    try {
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          script: `Hello, I am ${voiceName}. Welcome to whoami.genisisiq.com interactive cloud architecture studio.`,
-          voiceId,
-          pronunciations: pronRules,
-        }),
-      });
-      const data = await res.json();
-      if (data.audioUrl) {
-        if (audioRef.current) {
-          audioRef.current.pause();
-        }
-        const audio = new Audio(data.audioUrl);
-        audioRef.current = audio;
-        audio.onended = () => setPlayingVoiceId(null);
-        await audio.play().catch(() => setPlayingVoiceId(null));
-      } else {
-        setPlayingVoiceId(null);
+      } catch (error) { if (active) setError(error instanceof Error ? error.message : 'Unable to load settings.'); }
+      finally { if (active) setLoading(false); }
+    })();
+    void fetch('/api/me').then(async response => {
+      if (!response.ok) return;
+      const data = await response.json();
+      if (active) {
+        setPlatformAdmin(data.user?.role === 'Admin');
+        setCurrentUserId(data.user?.id || null);
       }
-    } catch {
-      setPlayingVoiceId(null);
-    }
+    }).catch(() => {});
+    return () => { active = false; audio.current?.pause(); };
+  }, [workspaceSlug]);
+  useEffect(() => { setMessage(''); }, [section]);
+  useEffect(() => {
+    if (section !== 'synthetic-voices') return;
+    let active = true;
+    setSpeechAvailable(null);
+    void (async () => {
+      try {
+        const response = await fetch('/api/capabilities');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Unable to check speech availability.');
+        if (active) setSpeechAvailable(Boolean(data.speech));
+      } catch (error) {
+        if (active) { setSpeechAvailable(false); setError(error instanceof Error ? error.message : 'Unable to check speech availability.'); }
+      }
+    })();
+    return () => { active = false; };
+  }, [section]);
+
+  async function save(patch: Record<string, unknown>) {
+    if (!canManage) return;
+    setPending(true); setError(''); setMessage('');
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceSlug)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+      const data = await response.json();
+      if (!response.ok || !data.workspace) throw new Error(data.error || 'Your changes could not be saved.');
+      setWorkspace(data.workspace);
+      setMessage('Changes saved.');
+      return true;
+    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to save settings.'); return false; }
+    finally { setPending(false); }
   }
-
-  return (
-    <WorkspaceShell workspaceSlug={workspaceSlug}>
-      <div className="flex h-full flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-8 py-4">
-          <div>
-            <h1 className="text-xl font-bold text-slate-900 capitalize">
-              Workspace Settings — {section.replace('-', ' ')}
-            </h1>
-            <p className="text-xs text-slate-500">
-              Manage workspace preferences, billing, Invite-Only admissions, Brand Kits, and AI voice settings.
-            </p>
-          </div>
-          {saved && (
-            <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
-              <Check className="h-3.5 w-3.5" /> Saved changes
-            </span>
-          )}
-        </header>
-
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left Settings Sub-nav */}
-          <div className="w-60 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50/60 p-3 space-y-1">
-            {SETTINGS_SECTIONS.map((item) => {
-              const active = section === item.id;
-              return (
-                <Link
-                  key={item.id}
-                  href={
-                    item.id === 'brand-kits'
-                      ? `/workspaces/${workspaceSlug}/settings/brand-kits/XE1uVIkZSLQJth6oUMJ0`
-                      : `/workspaces/${workspaceSlug}/settings/${item.id}`
-                  }
-                  className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium transition ${
-                    active
-                      ? 'bg-indigo-600 text-white font-semibold'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                  }`}
-                >
-                  <item.icon className="h-3.5 w-3.5" />
-                  <span>{item.label}</span>
-                </Link>
-              );
+  function canEditMember(member: Member) {
+    return canManage && Boolean(currentUserId) && member.user.id !== currentUserId &&
+      member.role !== 'OWNER' && (workspace?.role === 'OWNER' || member.role !== 'ADMIN');
+  }
+  async function updateMembership(
+    method: 'POST' | 'PATCH',
+    input: { email: string; role: MemberRole } | { memberId: string; role: MemberRole } | { memberId: string; remove: true }
+  ) {
+    if (!canManage || pending) return;
+    if ('role' in input && input.role === 'ADMIN' && workspace?.role !== 'OWNER') return;
+    if ('memberId' in input) {
+      const member = workspace?.members.find(item => item.id === input.memberId);
+      if (!member || !canEditMember(member)) return;
+    }
+    setPending(true); setError(''); setMessage('');
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceSlug)}/members`, {
+        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to update workspace membership.');
+      if ('remove' in input) {
+        if (data.ok !== true) throw new Error('The member removal response was incomplete. Refresh before retrying.');
+        setWorkspace(current => current ? { ...current, members: current.members.filter(member => member.id !== input.memberId) } : current);
+        setRemoveMemberId(null);
+        setMessage('Workspace access removed. Their account has not been deleted.');
+      } else {
+        const member = data.member as Member | undefined;
+        if (!member?.id || !member.user?.id) throw new Error('The membership response was incomplete. Refresh before retrying.');
+        setWorkspace(current => current ? {
+          ...current, members: current.members.some(item => item.id === member.id)
+            ? current.members.map(item => item.id === member.id ? member : item)
+            : [...current.members, member],
+        } : current);
+        setMemberRoles(current => {
+          const next = { ...current };
+          delete next[member.id];
+          return next;
+        });
+        if (method === 'POST') { setMemberEmail(''); setNewMemberRole('VIEWER'); }
+        setMessage(method === 'POST' ? 'Member added to this workspace. No account invitation email was sent.' : 'Workspace role updated.');
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unable to update workspace membership.');
+    } finally { setPending(false); }
+  }
+  async function createBrand(event: React.FormEvent) {
+    event.preventDefault();
+    if (!canManage) return;
+    setPending(true); setError(''); setMessage('');
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceSlug)}/brand-kits`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: brandUrl, workspaceSlug }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to create a brand kit.');
+      if (!data.brandKit?.id) throw new Error('The brand kit response was incomplete.');
+      setWorkspace(current => current ? { ...current, brandKits: [data.brandKit, ...current.brandKits] } : current);
+      setBrandUrl(''); setMessage('Brand kit created. Open it to review the extracted details.');
+    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to create a brand kit.'); }
+    finally { setPending(false); }
+  }
+  async function previewVoice(id: string, voiceName: string) {
+    audio.current?.pause();
+    setPlaying(id); setError('');
+    try {
+      const response = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceSlug, voiceId: id, script: `Hello, I am ${voiceName}. Here is a preview of this voice for your product story.`, pronunciations: rules }) });
+      const data = await response.json();
+      if (!response.ok || !data.audioUrl) throw new Error(data.error || 'Voice preview is not available.');
+      const player = new Audio(data.audioUrl);
+      audio.current = player;
+      player.onended = () => setPlaying(null);
+      player.onerror = () => { setPlaying(null); setError('The generated preview could not be played.'); };
+      await player.play();
+    } catch (error) { setPlaying(null); setError(error instanceof Error ? error.message : 'Unable to preview this voice.'); }
+  }
+  function checkboxes(config: Config, update: (value: Config) => void, options: Array<[string, string]>) {
+    return options.map(([key, label]) => <label key={key} className="flex items-center justify-between gap-6 border-b border-slate-200 py-4 text-sm"><span>{label}</span><input type="checkbox" disabled={readOnly} checked={Boolean(config[key])} onChange={event => update({ ...config, [key]: event.target.checked })} className="h-4 w-4 accent-orange-700" /></label>);
+  }
+  const saveButton = (patch: Record<string, unknown>) => <button type="button" disabled={readOnly} onClick={() => void save(patch)} className="btn-primary mt-6">{pending ? 'Saving…' : 'Save changes'}</button>;
+  return <WorkspaceShell workspaceSlug={workspaceSlug}>
+    <main className="page-wrap">
+      <header className="mb-8"><p className="eyebrow">06 / Workspace settings</p><h1 className="page-title mt-3">Make it your own.</h1><p className="page-intro mt-4">The essentials behind your workspace, your brand, and your team.</p></header>
+      <nav aria-label="Workspace settings" className="mb-8 flex flex-wrap gap-2 border-b border-slate-200 pb-5">{sections.map(([id, label]) => <Link key={id} href={`/workspaces/${workspaceSlug}/settings/${id}`} aria-current={section === id ? 'page' : undefined} className={section === id ? 'btn-primary' : 'btn-quiet'}>{label}</Link>)}</nav>
+      {error && <p className="status-error mb-5" role="alert">{error}</p>}
+      {message && <p className="status-success mb-5" role="status">{message}</p>}
+      {loading ? <p role="status">Loading workspace settings…</p> : workspace && <section className="panel max-w-4xl">
+        <h2 className="panel-heading">{sections.find(([id]) => id === section)?.[1] || 'Unknown settings section'}</h2>
+        {!canManage && <p className="mt-3 text-sm text-slate-500">Read-only access. Workspace owners and administrators can change these settings.</p>}
+        {section === 'general' && <form onSubmit={event => { event.preventDefault(); void save({ name: name.trim() }); }} className="mt-6 space-y-5"><label htmlFor="workspace-name" className="field-label block">Workspace name<input id="workspace-name" className="field mt-2 w-full" required maxLength={100} disabled={readOnly} value={name} onChange={event => setName(event.target.value)} /></label><label htmlFor="workspace-slug" className="field-label block">Workspace address<input id="workspace-slug" className="field mt-2 w-full font-mono" readOnly value={workspace.slug} /></label><button disabled={readOnly || !name.trim()} className="btn-primary">{pending ? 'Saving…' : 'Save workspace name'}</button></form>}
+        {section === 'members' && <>
+          <p className="mt-3 text-sm text-slate-500">Manage access to this workspace. Editors can create and edit projects; viewers have read-only access. Only the owner can appoint or change administrators.</p>
+          <aside className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
+            <h3 className="font-semibold">Account invitation first. Workspace access second.</h3>
+            <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-600">
+              <li>A platform administrator must invite the person to Arcade. They must accept the invitation and finish registering with a verified email.</li>
+              <li>A workspace owner or administrator can then add that registered email below. This does not send an invitation or create a new account.</li>
+            </ol>
+            {platformAdmin ? <Link href="/admin/invitations" className="btn-secondary mt-5">Manage account invitations ↗</Link> : <p className="mt-4 text-sm text-slate-500">Need a new account? Ask your platform administrator to issue an invitation first.</p>}
+          </aside>
+          {canManage && <form onSubmit={event => {
+            event.preventDefault();
+            void updateMembership('POST', { email: memberEmail.trim(), role: newMemberRole });
+          }} className="mt-7 grid items-end gap-4 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <label htmlFor="member-email" className="field-label">Registered account email
+              <input id="member-email" type="email" autoComplete="off" required maxLength={254} disabled={pending} value={memberEmail} onChange={event => setMemberEmail(event.target.value)} className="field mt-2 w-full" />
+            </label>
+            <label htmlFor="new-member-role" className="field-label">Workspace role
+              <select id="new-member-role" className="field mt-2 w-full" disabled={pending} value={newMemberRole} onChange={event => setNewMemberRole(event.target.value as MemberRole)}>
+                <option value="VIEWER">Viewer</option><option value="EDITOR">Editor</option>{workspace.role === 'OWNER' && <option value="ADMIN">Administrator</option>}
+              </select>
+            </label>
+            <button className="btn-primary mb-2" disabled={pending || !memberEmail.trim()}>{pending ? 'Updating…' : 'Add member'}</button>
+          </form>}
+          {pending && <p className="mt-4 text-sm text-slate-500" role="status">Updating workspace membership…</p>}
+          <div className="mt-7 divide-y divide-slate-200" aria-busy={pending}>
+            {(workspace.members || []).map(member => {
+              const selectedRole = memberRoles[member.id] || member.role as MemberRole;
+              return <article key={member.id} className="flex flex-wrap items-center justify-between gap-5 py-5">
+                <div className="min-w-0">
+                  <p className="break-words font-medium">{member.user.name || member.user.email || 'Member'}{member.user.id === currentUserId && <span className="ml-2 text-xs text-slate-500">(you)</span>}</p>
+                  {member.user.email && <p className="mt-1 break-all text-sm text-slate-500">{member.user.email}</p>}
+                </div>
+                {canEditMember(member) ? <div className="flex flex-wrap items-center gap-3">
+                  <label htmlFor={`role-${member.id}`} className="sr-only">Workspace role for {member.user.email || member.user.name || 'member'}</label>
+                  <select id={`role-${member.id}`} className="field" disabled={pending} value={selectedRole} onChange={event => setMemberRoles(current => ({ ...current, [member.id]: event.target.value as MemberRole }))}>
+                    <option value="VIEWER">Viewer</option><option value="EDITOR">Editor</option>{workspace.role === 'OWNER' && <option value="ADMIN">Administrator</option>}
+                  </select>
+                  <button type="button" className="btn-secondary" disabled={pending || selectedRole === member.role} onClick={() => void updateMembership('PATCH', { memberId: member.id, role: selectedRole })}>Save role</button>
+                  {removeMemberId === member.id ? <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm">Remove workspace access?</span>
+                    <button type="button" className="btn-secondary" disabled={pending} onClick={() => void updateMembership('PATCH', { memberId: member.id, remove: true })}>Confirm removal</button>
+                    <button type="button" className="btn-quiet" disabled={pending} onClick={() => setRemoveMemberId(null)}>Cancel</button>
+                  </div> : <button type="button" className="btn-quiet" disabled={pending} onClick={() => setRemoveMemberId(member.id)}>Remove</button>}
+                </div> : <span className="tag">{member.role}</span>}
+              </article>;
             })}
           </div>
-
-          {/* Right Settings Content */}
-          <div className="flex-1 overflow-y-auto p-8">
-            {/* 1. GENERAL */}
-            {section === 'general' && (
-              <div className="max-w-xl space-y-5">
-                <h2 className="text-lg font-bold text-slate-900">General Workspace Settings</h2>
-                <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-500">
-                    Workspace Name
-                  </label>
-                  <input
-                    type="text"
-                    value={wsName}
-                    onChange={(e) => setWsName(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-500">
-                    Workspace Slug
-                  </label>
-                  <input
-                    type="text"
-                    value={wsSlugInput}
-                    readOnly
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 font-mono text-xs text-slate-500"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => saveWorkspacePatch({ name: wsName })}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700"
-                >
-                  <Save className="h-3.5 w-3.5" /> Save General Settings
-                </button>
-              </div>
-            )}
-
-            {/* 2. BILLING */}
-            {section === 'billing' && (
-              <div className="max-w-2xl space-y-6">
-                <h2 className="text-lg font-bold text-slate-900">Plan & Credit Balance</h2>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-xs font-bold uppercase text-indigo-600">Current Tier</div>
-                      <div className="text-2xl font-extrabold text-slate-900">
-                        {workspace?.planTier || 'FREE'} PLAN
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        Monthly Quota: {workspace?.monthlyCreditsQuota ?? 200} credits • Bonus Pool:{' '}
-                        {workspace?.bonusCreditsBalance ?? 200} credits • Used:{' '}
-                        {workspace?.usedCreditsThisCycle ?? 100} credits
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Link
-                        href={`/workspaces/${workspaceSlug}/purchase-credits`}
-                        className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
-                      >
-                        Buy Credit Pack
-                      </Link>
-                      <Link
-                        href={`/workspaces/${workspaceSlug}/upgrade`}
-                        className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
-                      >
-                        Upgrade Plan
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 3. MEMBERS & INVITES */}
-            {section === 'members' && (
-              <div className="max-w-3xl space-y-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-900">
-                      Workspace Members & Invite-Only Admission
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Create one-time cryptographic invitation links via the ReadWise admission engine.
-                    </p>
-                  </div>
-                  <Link
-                    href="/admin/invitations"
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
-                  >
-                    <KeyRound className="h-3.5 w-3.5" /> Open Invitation Admin Console
-                  </Link>
-                </div>
-
-                <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white p-4">
-                  {(workspace?.members || []).map((m: any) => (
-                    <div key={m.id} className="flex items-center justify-between py-2.5">
-                      <div>
-                        <div className="font-bold text-sm text-slate-900">
-                          {m.user?.name || 'jack wolf'} ({m.user?.email || 'wlfjck@gmail.com'})
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          Workspace {m.role} • Active Session Verified
-                        </div>
-                      </div>
-                      <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
-                        {m.role}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 4. SECURITY & SSO */}
-            {section === 'security' && (
-              <div className="max-w-2xl space-y-5">
-                <h2 className="text-lg font-bold text-slate-900">Enterprise Security & SAML 2.0 SSO</h2>
-                <p className="text-xs text-slate-500">
-                  Configure ReadWise Invitation-Only account admission, SAML 2.0 Single Sign-On, and SCIM directory sync.
-                </p>
-
-                <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">
-                  <label className="flex items-center justify-between text-xs font-semibold text-slate-800">
-                    <span>Enforce Invitation-Only Account Registration (ReadWise Admission)</span>
-                    <input
-                      type="checkbox"
-                      checked={securityConfig.enforceInviteOnly}
-                      onChange={(e) =>
-                        setSecurityConfig({ ...securityConfig, enforceInviteOnly: e.target.checked })
-                      }
-                      className="h-4 w-4 accent-indigo-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between text-xs font-semibold text-slate-800">
-                    <span>Enable SAML 2.0 Single Sign-On (Microsoft Entra ID / Okta)</span>
-                    <input
-                      type="checkbox"
-                      checked={securityConfig.samlEnabled}
-                      onChange={(e) =>
-                        setSecurityConfig({ ...securityConfig, samlEnabled: e.target.checked })
-                      }
-                      className="h-4 w-4 accent-indigo-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between text-xs font-semibold text-slate-800">
-                    <span>Enable SCIM 2.0 Automated Role Provisioning</span>
-                    <input
-                      type="checkbox"
-                      checked={securityConfig.scimProvisioning}
-                      onChange={(e) =>
-                        setSecurityConfig({ ...securityConfig, scimProvisioning: e.target.checked })
-                      }
-                      className="h-4 w-4 accent-indigo-600"
-                    />
-                  </label>
-
-                  <div className="pt-2">
-                    <label className="block text-[11px] font-semibold uppercase text-slate-500">
-                      IdP Entity ID / Issuer URL
-                    </label>
-                    <input
-                      type="text"
-                      value={securityConfig.idpEntityId}
-                      onChange={(e) =>
-                        setSecurityConfig({ ...securityConfig, idpEntityId: e.target.value })
-                      }
-                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold uppercase text-slate-500">
-                      SAML 2.0 SSO Login Endpoint
-                    </label>
-                    <input
-                      type="text"
-                      value={securityConfig.ssoLoginUrl}
-                      onChange={(e) =>
-                        setSecurityConfig({ ...securityConfig, ssoLoginUrl: e.target.value })
-                      }
-                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-xs"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    saveWorkspacePatch({
-                      advancedSettings: { ...advancedConfig, securityConfig },
-                    })
-                  }
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700"
-                >
-                  <Save className="h-3.5 w-3.5" /> Save Security & SSO Policy
-                </button>
-              </div>
-            )}
-
-            {/* 5. VIEWER PRIVACY */}
-            {section === 'privacy' && (
-              <div className="max-w-2xl space-y-5">
-                <h2 className="text-lg font-bold text-slate-900">Viewer Privacy & GDPR Governance</h2>
-                <p className="text-xs text-slate-500">
-                  Control how viewer telemetry, IP addresses, and captured DOM PII are handled across shared players.
-                </p>
-
-                <div className="space-y-3.5 rounded-2xl border border-slate-200 bg-white p-5">
-                  {[
-                    {
-                      key: 'anonymizeViewerIp',
-                      label: 'Anonymize Viewer IPv4/IPv6 Addresses Before Persistence',
-                    },
-                    {
-                      key: 'autoRedactEmailsInDom',
-                      label: 'Automatically Blur / Redact Detected Emails & Tokens During Capture',
-                    },
-                    {
-                      key: 'cookielessAnalytics',
-                      label: 'Strict Cookie-less Telemetry Mode (Session-Only Viewer IDs)',
-                    },
-                    {
-                      key: 'euGdprDataResidency',
-                      label: 'Enforce GDPR / CCPA Compliant Data Retention (90-Day Auto-Purge)',
-                    },
-                    {
-                      key: 'allowSearchEngineIndexing',
-                      label: 'Allow Search Engines to Index Public Share & Guide Pages',
-                    },
-                  ].map((item) => (
-                    <label
-                      key={item.key}
-                      className="flex items-center justify-between text-xs font-semibold text-slate-800"
-                    >
-                      <span>{item.label}</span>
-                      <input
-                        type="checkbox"
-                        checked={Boolean((privacyConfig as any)[item.key])}
-                        onChange={(e) =>
-                          setPrivacyConfig({ ...privacyConfig, [item.key]: e.target.checked })
-                        }
-                        className="h-4 w-4 accent-indigo-600"
-                      />
-                    </label>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => saveWorkspacePatch({ privacySettings: privacyConfig })}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700"
-                >
-                  <Save className="h-3.5 w-3.5" /> Save Viewer Privacy Settings
-                </button>
-              </div>
-            )}
-
-            {/* 6. INTEGRATIONS */}
-            {section === 'integrations' && (
-              <div className="max-w-3xl space-y-5">
-                <h2 className="text-lg font-bold text-slate-900">GTM & CRM Integrations</h2>
-                <p className="text-xs text-slate-500">
-                  Toggle live integrations to sync viewer telemetry, captured leads, and Slack notifications.
-                </p>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  {(workspace?.integrations || []).map((integ: any) => {
-                    const isConn = integ.status === 'CONNECTED';
-                    return (
-                      <div
-                        key={integ.id}
-                        className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs"
-                      >
-                        <div>
-                          <div className="text-sm font-bold text-slate-900">{integ.provider}</div>
-                          <div className="text-[11px] text-slate-500">{integ.category}</div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => saveWorkspacePatch({ toggleIntegrationId: integ.id })}
-                          className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
-                            isConn
-                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                              : 'bg-slate-900 text-white hover:bg-slate-800'
-                          }`}
-                        >
-                          {isConn ? 'Connected ✓' : 'Connect'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* 7. TRANSLATIONS (36 LOCALES) */}
-            {section === 'translations' && (
-              <div className="max-w-3xl space-y-5">
-                <h2 className="text-lg font-bold text-slate-900">
-                  Multi-Language Auto-Localization (36 Locales)
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Configure default locale, browser language auto-detection, and AI voiceover dubbing across 36 languages.
-                </p>
-
-                <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5">
-                  <label className="flex items-center justify-between text-xs font-semibold text-slate-800">
-                    <span>Auto-detect viewer browser language (`Accept-Language`) on Share Player</span>
-                    <input
-                      type="checkbox"
-                      checked={translationConfig.autoDetectBrowserLocale}
-                      onChange={(e) =>
-                        setTranslationConfig({
-                          ...translationConfig,
-                          autoDetectBrowserLocale: e.target.checked,
-                        })
-                      }
-                      className="h-4 w-4 accent-indigo-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between text-xs font-semibold text-slate-800">
-                    <span>Synthesize localized ElevenLabs voiceover narration per language</span>
-                    <input
-                      type="checkbox"
-                      checked={translationConfig.translateVoiceoverAudio}
-                      onChange={(e) =>
-                        setTranslationConfig({
-                          ...translationConfig,
-                          translateVoiceoverAudio: e.target.checked,
-                        })
-                      }
-                      className="h-4 w-4 accent-indigo-600"
-                    />
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                  {TRANSLATION_LOCALES.map((loc) => {
-                    const enabled = translationConfig.enabledLocales.includes(loc.code);
-                    return (
-                      <button
-                        key={loc.code}
-                        type="button"
-                        onClick={() => {
-                          const next = enabled
-                            ? translationConfig.enabledLocales.filter((c) => c !== loc.code)
-                            : [...translationConfig.enabledLocales, loc.code];
-                          setTranslationConfig({ ...translationConfig, enabledLocales: next });
-                        }}
-                        className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left text-xs transition ${
-                          enabled
-                            ? 'border-indigo-600 bg-indigo-50/70 font-semibold text-indigo-900'
-                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        <span className="truncate">{loc.name}</span>
-                        <span className="font-mono text-[10px] uppercase text-slate-400">
-                          {loc.code}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => saveWorkspacePatch({ translationSettings: translationConfig })}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700"
-                >
-                  <Save className="h-3.5 w-3.5" /> Save Localization Preferences
-                </button>
-              </div>
-            )}
-
-            {/* 8. PRONUNCIATION */}
-            {section === 'pronunciation' && (
-              <div className="max-w-2xl space-y-5">
-                <h2 className="text-lg font-bold text-slate-900">
-                  AI Voiceover Pronunciation Dictionary
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Define phonetic replacements for technical acronyms (e.g. SC-100, AZ-305, genisisiq).
-                </p>
-
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Acronym / Word (e.g. CISSP)"
-                    value={newWord}
-                    onChange={(e) => setNewWord(e.target.value)}
-                    className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-xs"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Spoken Phonetic (e.g. C I S S P)"
-                    value={newReplacement}
-                    onChange={(e) => setNewReplacement(e.target.value)}
-                    className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-xs"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newWord.trim() || !newReplacement.trim()) return;
-                      const next = [
-                        ...pronRules,
-                        { id: `pr_${Date.now()}`, word: newWord.trim(), replacement: newReplacement.trim() },
-                      ];
-                      setPronRules(next);
-                      setNewWord('');
-                      setNewReplacement('');
-                      saveWorkspacePatch({ pronunciationRules: next });
-                    }}
-                    className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add Rule
-                  </button>
-                </div>
-
-                <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white">
-                  {pronRules.map((r) => (
-                    <div key={r.id} className="flex items-center justify-between px-4 py-3 text-xs">
-                      <div>
-                        <span className="font-mono font-bold text-slate-900">{r.word}</span>
-                        <span className="ml-3 text-slate-500">Spoken as → &ldquo;{r.replacement}&rdquo;</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = pronRules.filter((item) => item.id !== r.id);
-                          setPronRules(next);
-                          saveWorkspacePatch({ pronunciationRules: next });
-                        }}
-                        className="text-slate-400 hover:text-rose-600"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 9. SYNTHETIC VOICES */}
-            {section === 'synthetic-voices' && (
-              <div className="max-w-3xl space-y-4">
-                <h2 className="text-lg font-bold text-slate-900">11 ElevenLabs Studio Voices</h2>
-                <p className="text-xs text-slate-500">
-                  Click Preview on any voice to synthesize and play a real WAV voiceover sample with your pronunciation rules applied.
-                </p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {ELEVENLABS_VOICES.map((v) => {
-                    const isPlaying = playingVoiceId === v.id;
-                    return (
-                      <div
-                        key={v.id}
-                        className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3.5"
-                      >
-                        <div>
-                          <div className="text-xs font-bold text-slate-900">{v.name}</div>
-                          <div className="text-[11px] text-slate-500">
-                            {v.accent} • {v.style}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => previewSyntheticVoice(v.id, v.name)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                        >
-                          <Play className="h-3 w-3" />
-                          {isPlaying ? 'Playing...' : 'Preview WAV'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* 10. ADVANCED */}
-            {section === 'advanced' && (
-              <div className="max-w-2xl space-y-5">
-                <h2 className="text-lg font-bold text-slate-900">
-                  Advanced CNAME, Webhooks & Render Defaults
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Configure custom white-label CNAME domains, outbound webhook endpoints, and FFmpeg video export defaults.
-                </p>
-
-                <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5">
-                  <div>
-                    <label className="block text-xs font-semibold uppercase text-slate-500">
-                      Custom Share CNAME Domain
-                    </label>
-                    <input
-                      type="text"
-                      value={advancedConfig.customCnameDomain}
-                      onChange={(e) =>
-                        setAdvancedConfig({ ...advancedConfig, customCnameDomain: e.target.value })
-                      }
-                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold uppercase text-slate-500">
-                      Outbound Lead & Telemetry Webhook URL
-                    </label>
-                    <input
-                      type="text"
-                      value={advancedConfig.webhookUrl}
-                      onChange={(e) =>
-                        setAdvancedConfig({ ...advancedConfig, webhookUrl: e.target.value })
-                      }
-                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-xs"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold uppercase text-slate-500">
-                        Default Video Resolution
-                      </label>
-                      <select
-                        value={advancedConfig.defaultExportResolution}
-                        onChange={(e) =>
-                          setAdvancedConfig({
-                            ...advancedConfig,
-                            defaultExportResolution: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs"
-                      >
-                        <option value="720p">720p HD</option>
-                        <option value="1080p">1080p Full HD</option>
-                        <option value="4K">4K Ultra HD</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold uppercase text-slate-500">
-                        Default Frame Rate
-                      </label>
-                      <select
-                        value={advancedConfig.defaultExportFps}
-                        onChange={(e) =>
-                          setAdvancedConfig({
-                            ...advancedConfig,
-                            defaultExportFps: Number(e.target.value),
-                          })
-                        }
-                        className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs"
-                      >
-                        <option value={30}>30 FPS</option>
-                        <option value={60}>60 FPS</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => saveWorkspacePatch({ advancedSettings: advancedConfig })}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700"
-                >
-                  <Save className="h-3.5 w-3.5" /> Save Advanced Configuration
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </WorkspaceShell>
-  );
+          {!workspace.members?.length && <p className="empty-state mt-5">No members returned for this workspace.</p>}
+          {canManage && <p className="mt-5 text-sm text-slate-500">Your own membership and the workspace owner cannot be changed here. Removing someone revokes workspace and team access, not their Arcade account.</p>}
+        </>}
+        {section === 'brand-kits' && <><p className="mt-3 text-sm text-slate-500">Review your colors, typography, and product direction before using them in a project.</p>{canManage && <form onSubmit={createBrand} className="mt-6 flex flex-wrap items-end gap-3"><label htmlFor="brand-url" className="field-label flex-1">Brand website<input id="brand-url" type="url" required value={brandUrl} onChange={event => setBrandUrl(event.target.value)} placeholder="https://your-company.com" className="field mt-2 w-full" disabled={pending} /></label><button className="btn-primary" disabled={pending}>{pending ? 'Extracting brand…' : 'Create brand kit'}</button></form>}<div className="mt-6 divide-y divide-slate-200">{(workspace.brandKits || []).map(kit => <Link key={kit.id} href={`/workspaces/${workspaceSlug}/settings/brand-kits/${kit.id}`} className="flex flex-wrap justify-between gap-3 py-5"><div><p className="font-semibold">{kit.name}</p><p className="mt-1 text-sm text-slate-500">{kit.sourceUrl}</p></div><span className="tag">{kit.status} ↗</span></Link>)}</div>{!workspace.brandKits?.length && <p className="empty-state mt-5">No brand kits yet. Add your website to create one.</p>}</>}
+        {section === 'billing' && <><p className="mt-4 text-sm text-slate-500">Recorded plan</p><p className="mt-2 text-3xl font-semibold">{workspace.planTier}</p><dl className="mt-6 grid gap-4 sm:grid-cols-3">{[['Monthly quota', workspace.monthlyCreditsQuota], ['Bonus balance', workspace.bonusCreditsBalance], ['Used this cycle', workspace.usedCreditsThisCycle]].map(([label, value]) => <div key={label}><dt className="text-sm text-slate-500">{label}</dt><dd className="stat-number mt-2">{value}</dd></div>)}</dl><p className="mt-6 text-sm text-slate-500">Online checkout, credit purchases, and plan changes are not available. These balances are not a payment confirmation.</p><Link href={`/workspaces/${workspaceSlug}/usage`} className="btn-secondary mt-5">View usage ledger →</Link></>}
+        {section === 'security' && <div className="mt-5 space-y-5"><p>Account registration is invitation-only. Workspace settings cannot change platform admission rules.</p><div className="empty-state"><h3 className="font-semibold">SSO and directory sync are not available</h3><p className="mt-2 text-sm">SAML, SCIM, and identity provider provisioning are not connected. No security policy is activated by this page.</p></div><Link href="/forgot-password" className="btn-secondary">Password recovery</Link></div>}
+        {section === 'privacy' && <>
+          <p className="mt-3 text-sm text-slate-500">Control viewer event collection and save workspace preferences. These are not a compliance certification. Review each project before sharing; data residency is not configured here.</p>
+          <label className="mt-5 flex items-center justify-between gap-6 border-b border-slate-200 py-4 text-sm"><span>Collect viewer analytics on published walkthroughs</span><input type="checkbox" disabled={readOnly} checked={privacy.collectViewerAnalytics !== false} onChange={event => setPrivacy({ ...privacy, collectViewerAnalytics: event.target.checked })} className="h-4 w-4 accent-orange-700" /></label>
+          <label htmlFor="analytics-retention" className="field-label mt-6 block">Analytics retention · days
+            <input id="analytics-retention" type="number" min={1} max={730} step={1} disabled={readOnly} value={privacy.retentionDays ?? 365} onChange={event => setPrivacy({ ...privacy, retentionDays: event.target.value === '' ? '' : Number(event.target.value) })} aria-describedby="retention-note" className="field mt-2 w-full sm:max-w-48" />
+          </label>
+          <p id="retention-note" className="mt-2 text-sm text-slate-500">Choose 1–730 days. Retention is applied when the deployment operator runs the analytics maintenance command. Scheduling is managed outside this page; saving a preference does not run cleanup immediately.</p>
+          <div>{checkboxes(privacy, setPrivacy, [['anonymizeViewerIp', 'Prefer anonymized viewer IP addresses'], ['autoRedactEmailsInDom', 'Prefer email redaction during capture'], ['cookielessAnalytics', 'Prefer cookie-less viewer analytics'], ['allowSearchEngineIndexing', 'Allow indexing of public share pages']])}</div>
+          <button type="button" disabled={readOnly || !Number.isInteger(privacy.retentionDays ?? 365) || (privacy.retentionDays ?? 365) < 1 || (privacy.retentionDays ?? 365) > 730} onClick={() => void save({ privacySettings: { ...privacy, retentionDays: privacy.retentionDays ?? 365 } })} className="btn-primary mt-6">{pending ? 'Saving…' : 'Save privacy preferences'}</button>
+        </>}
+        {section === 'integrations' && <div className="empty-state mt-6"><h3 className="font-semibold">No live integrations available</h3><p className="mt-2 text-sm">CRM synchronization, Slack delivery, and third-party connectors are not configured. Leads remain in your workspace; saving a preference does not connect an account.</p><Link href={`/workspaces/${workspaceSlug}/leads`} className="btn-secondary mt-5">View captured leads</Link></div>}
+        {section === 'translations' && <><p className="mt-3 text-sm text-slate-500">Choose your workspace language preferences. Translation and audio generation require a configured provider and an explicit project action.</p><label htmlFor="default-locale" className="field-label mt-6 block">Default language<select id="default-locale" disabled={readOnly} className="field mt-2 w-full" value={translations.defaultLocale || ''} onChange={event => setTranslations({ ...translations, defaultLocale: event.target.value })}><option value="">Not set</option>{TRANSLATION_LOCALES.map(locale => <option key={locale.code} value={locale.code}>{locale.name}</option>)}</select></label>{checkboxes(translations, setTranslations, [['autoDetectBrowserLocale', 'Prefer the viewer’s browser language'], ['translateVoiceoverAudio', 'Include voiceover in translation requests']])}<fieldset disabled={readOnly} className="mt-6"><legend className="field-label mb-4">Enabled languages</legend><div className="grid gap-3 sm:grid-cols-3">{TRANSLATION_LOCALES.map(locale => <label key={locale.code} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={(translations.enabledLocales || []).includes(locale.code)} onChange={event => setTranslations({ ...translations, enabledLocales: event.target.checked ? [...(translations.enabledLocales || []), locale.code] : (translations.enabledLocales || []).filter((code: string) => code !== locale.code) })} />{locale.name}</label>)}</div></fieldset>{saveButton({ translationSettings: translations })}</>}
+        {section === 'pronunciation' && <><p className="mt-3 text-sm text-slate-500">Tell voice generation how to say your product names and abbreviations.</p>{canManage && <form onSubmit={async event => { event.preventDefault(); const next = [...rules, { id: crypto.randomUUID(), word: word.trim(), replacement: replacement.trim() }]; if (await save({ pronunciationRules: next })) { setRules(next); setWord(''); setReplacement(''); } }} className="mt-6 grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]"><label htmlFor="word" className="field-label">Word<input id="word" required value={word} onChange={event => setWord(event.target.value)} className="field mt-2 w-full" disabled={pending} /></label><label htmlFor="replacement" className="field-label">Spoken as<input id="replacement" required value={replacement} onChange={event => setReplacement(event.target.value)} className="field mt-2 w-full" disabled={pending} /></label><button className="btn-primary" disabled={pending || !word.trim() || !replacement.trim()}>{pending ? 'Saving…' : 'Add rule'}</button></form>}<div className="mt-6 divide-y divide-slate-200">{rules.map(rule => <div key={rule.id} className="flex items-center justify-between gap-4 py-4"><p><span className="font-mono">{rule.word}</span><span className="mx-3 text-slate-400">→</span>{rule.replacement}</p>{canManage && <button className="btn-quiet" disabled={pending} aria-label={`Remove pronunciation for ${rule.word}`} onClick={async () => { const next = rules.filter(item => item.id !== rule.id); if (await save({ pronunciationRules: next })) setRules(next); }}>Remove</button>}</div>)}</div>{!rules.length && <p className="empty-state mt-5">No pronunciation rules yet.</p>}</>}
+        {section === 'synthetic-voices' && <><p className="mt-3 text-sm text-slate-500">Voice presets require a configured speech provider. Preview generation may consume credits.</p>{speechAvailable === null ? <p className="mt-4 text-sm" role="status">Checking speech availability…</p> : !speechAvailable && <p className="empty-state mt-5">Speech previews are unavailable in this deployment. Ask your administrator to configure a speech provider.</p>}<div className="mt-6 divide-y divide-slate-200">{ELEVENLABS_VOICES.map(voice => <div key={voice.id} className="flex items-center justify-between gap-4 py-4"><div><p className="font-medium">{voice.name}</p><p className="text-sm text-slate-500">{voice.style}</p></div><button className="btn-secondary" disabled={readOnly || playing !== null || !speechAvailable} onClick={() => void previewVoice(voice.id, voice.name)}>{playing === voice.id ? 'Previewing…' : 'Preview'}</button></div>)}</div>{playing && <button className="btn-quiet mt-4" onClick={() => { audio.current?.pause(); setPlaying(null); }}>Stop playback</button>}</>}
+        {section === 'advanced' && <><p className="mt-3 text-sm text-slate-500">Choose export settings within each project. Workspace-level export defaults, custom domains, and outbound webhooks are not currently supported.</p><div className="empty-state mt-6"><h3 className="font-semibold">Workspace export defaults are unavailable.</h3><p className="mt-2 text-sm">Available render formats depend on the project and configured engine. No deployment setting is activated here.</p></div>{(advanced.defaultExportResolution || advanced.defaultExportFps) && <dl className="mt-6 grid gap-5 sm:grid-cols-2"><div><dt className="text-sm text-slate-500">Previously recorded resolution</dt><dd className="mt-2 font-mono">{advanced.defaultExportResolution || 'Not set'}</dd></div><div><dt className="text-sm text-slate-500">Previously recorded frame rate</dt><dd className="mt-2 font-mono">{advanced.defaultExportFps || 'Not set'}</dd></div></dl>}</>}
+        {!sections.some(([id]) => id === section) && <p className="empty-state mt-5">Choose a settings section above.</p>}
+      </section>}
+    </main>
+  </WorkspaceShell>;
 }

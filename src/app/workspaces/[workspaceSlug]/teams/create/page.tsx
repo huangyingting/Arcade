@@ -1,120 +1,42 @@
 'use client';
 
-import React, { useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { WorkspaceShell } from '@/components/workspace/WorkspaceShell';
-import { Users, ArrowRight, ShieldCheck } from 'lucide-react';
 
-export default function CreateTeamPage({ params: rawParams }: { params: Promise<{ workspaceSlug: string }> }) {
-  const params = React.use(rawParams);
+export default function CreateTeamPage({ params }: { params: Promise<{ workspaceSlug: string }> }) {
+  const { workspaceSlug } = use(params);
   const router = useRouter();
-  const [name, setName] = useState('Cloud Architecture GTM');
-  const [visibility, setVisibility] = useState<'workspace' | 'private'>('workspace');
-  const [step, setStep] = useState(1);
-  const [creating, setCreating] = useState(false);
-
-  async function handleCreateTeam() {
-    if (!name.trim()) return;
-    setCreating(true);
+  const [role, setRole] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true; setRole(null); setError('');
+    void (async () => {
+      try {
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceSlug)}`);
+        const data = await response.json();
+        if (!response.ok || !data.workspace) throw new Error(data.error || 'Unable to load this workspace.');
+        if (active) setRole(data.workspace.role);
+      } catch (error) { if (active) setError(error instanceof Error ? error.message : 'Unable to check workspace access.'); }
+    })();
+    return () => { active = false; };
+  }, [workspaceSlug]);
+  const canManage = role === 'OWNER' || role === 'ADMIN';
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); if (!canManage) return;
+    setPending(true); setError('');
     try {
-      const teamSlug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      await fetch(`/api/workspaces/${params.workspaceSlug}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ createTeamName: name.trim(), visibility }),
-      });
-      router.push(`/workspaces/${params.workspaceSlug}/teams/${teamSlug}`);
-    } finally {
-      setCreating(false);
-    }
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceSlug)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ createTeamName: name.trim() }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to create a team.');
+      const team = data.team || data.workspace?.teams?.find((item: { name: string; slug: string }) => item.name === name.trim());
+      if (!team?.slug) throw new Error('The team response was incomplete. Reload the workspace before trying again.');
+      router.push(`/workspaces/${workspaceSlug}/teams/${team.slug}`);
+    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to create a team.'); }
+    finally { setPending(false); }
   }
-
-  return (
-    <WorkspaceShell workspaceSlug={params.workspaceSlug}>
-      <div className="mx-auto max-w-xl px-8 py-12">
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-            <Users className="h-5 w-5" />
-          </div>
-          <h1 className="mt-4 text-xl font-bold text-slate-900">
-            Create a Team — Step {step} of 2
-          </h1>
-          {step === 1 ? (
-            <div className="mt-4 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase text-slate-500">Team Name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm"
-                />
-              </div>
-              <button
-                onClick={() => setStep(2)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700"
-              >
-                Continue to Permissions <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ) : (
-            <div className="mt-4 space-y-4">
-              <p className="text-xs text-slate-600">
-                Choose default visibility for Interactive Demos, AI Videos, and Visuals created in{' '}
-                <strong>{name}</strong>.
-              </p>
-              <div className="space-y-2">
-                {[
-                  {
-                    id: 'workspace',
-                    label: 'Workspace-Wide Access',
-                    desc: 'All workspace members can view and collaborate on assets in this team.',
-                  },
-                  {
-                    id: 'private',
-                    label: 'Invite-Only Team Vault',
-                    desc: 'Only explicitly assigned team members can edit assets in this team.',
-                  },
-                ].map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setVisibility(opt.id as 'workspace' | 'private')}
-                    className={`w-full rounded-xl border p-3.5 text-left transition ${
-                      visibility === opt.id
-                        ? 'border-indigo-600 bg-indigo-50/60'
-                        : 'border-slate-200 bg-white hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
-                      <ShieldCheck className="h-4 w-4 text-indigo-600" />
-                      {opt.label}
-                    </div>
-                    <div className="mt-1 text-[11px] text-slate-500">{opt.desc}</div>
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setStep(1)}
-                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600"
-                >
-                  Back
-                </button>
-                <button
-                  type="button"
-                  disabled={creating}
-                  onClick={handleCreateTeam}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {creating ? 'Creating Team...' : 'Create Team & Open Library'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </WorkspaceShell>
-  );
+  return <WorkspaceShell workspaceSlug={workspaceSlug}><main className="page-wrap"><p className="eyebrow">02 / Team workspace</p><h1 className="page-title mt-3">A team with a purpose.</h1><p className="page-intro mt-4">Organize walkthroughs around the people creating them.</p>{error && <p className="status-error mt-6" role="alert">{error}</p>}{role === null ? !error && <p className="mt-6" role="status">Checking workspace access…</p> : !canManage ? <p className="empty-state mt-8">Only workspace owners and administrators can create teams.</p> : <section className="panel mt-8 max-w-xl"><h2 className="panel-heading">Create a team</h2><p className="mt-3 text-sm text-slate-500">Teams organize projects within this workspace. Private team access policies are not available.</p><form onSubmit={submit} className="mt-6 space-y-6"><label htmlFor="team-name" className="field-label block">Team name<input id="team-name" required maxLength={100} value={name} onChange={event => setName(event.target.value)} placeholder="Product, marketing, or your next initiative" className="field mt-2 w-full" disabled={pending} /></label><button className="btn-primary" disabled={pending || !name.trim()}>{pending ? 'Creating team…' : 'Create team →'}</button></form></section>}<Link href={`/workspaces/${workspaceSlug}`} className="btn-quiet mt-5">Back to workspace</Link></main></WorkspaceShell>;
 }

@@ -1,54 +1,34 @@
+import { randomBytes } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { api, body, HttpError, requireUser, text, throttle } from '@/lib/api';
 
-export async function GET() {
-  const workspaces = await prisma.workspace.findMany({
-    include: {
-      teams: true,
-      brandKits: true,
-    },
-    orderBy: { createdAt: 'asc' },
+export const GET = api(async () => {
+  const user = await requireUser();
+  const members = await prisma.workspaceMember.findMany({
+    where: { userId: user.id }, include: { workspace: { include: { teams: true, brandKits: true } } },
+    orderBy: { joinedAt: 'asc' },
   });
-  return NextResponse.json({ workspaces });
-}
+  return NextResponse.json({ workspaces: members.map(({ workspace, role }) => ({ ...workspace, role })) });
+});
 
-export async function POST(request: Request) {
-  const body = await request.json();
-  const name = (body.name || 'New Workspace').trim();
-  const rawSlug = (body.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/^-|-$/g, '');
-  const slug = rawSlug || `workspace-${Math.random().toString(36).slice(2, 8)}`;
-
-  let user = await prisma.user.findFirst();
-  if (!user) {
-    user = await prisma.user.create({
-      data: { email: 'wlfjck@gmail.com', name: 'jack wolf' },
-    });
+export const POST = api(async (request) => {
+  const user = await requireUser();
+  await throttle(`workspace:${user.id}`, 10, 3600);
+  const input = await body(request);
+  const name = text(input.name, 'Workspace name', 100);
+  const slug = input.slug === undefined
+    ? `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'studio'}-${randomBytes(3).toString('hex')}`
+    : text(input.slug, 'Workspace URL', 64);
+  if (!/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(slug) || ['create', 'api', 'admin'].includes(slug)) {
+    throw new HttpError(400, 'Use 3–64 lowercase letters, numbers and hyphens for the workspace URL.');
   }
-
   const workspace = await prisma.workspace.create({
     data: {
-      name,
-      slug,
-      iconUrl: body.iconUrl || null,
-      planTier: 'FREE',
-      monthlyCreditsQuota: 200,
-      bonusCreditsBalance: 0,
-      usedCreditsThisCycle: 0,
-      members: {
-        create: {
-          userId: user.id,
-          role: 'OWNER',
-        },
-      },
-      teams: {
-        create: {
-          name: 'Just me',
-          slug: 'me',
-          isPersonal: true,
-        },
-      },
+      name, slug,
+      members: { create: { userId: user.id, role: 'OWNER' } },
+      teams: { create: { name: 'Personal', slug: 'me', isPersonal: true, members: { create: { userId: user.id } } } },
     },
   });
-
-  return NextResponse.json({ workspace });
-}
+  return NextResponse.json({ workspace }, { status: 201 });
+});
