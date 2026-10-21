@@ -45,12 +45,12 @@ npm start
 The earlier prototype had no migration history and used seeded data and public uploads. **Do not blindly deploy the empty-database baseline into a populated database, reset a database, or approve data-loss flags without reviewing the target and SQL.**
 
 1. Stop application writes and take verified backups of the database and old uploads.
-2. Generate/review the schema difference against your existing database. Apply only the reviewed non-destructive changes needed to reach the current schema; in particular, consent tracking and analytics-deduplication fields/indexes are new.
-3. Once the actual database matches the current baseline, record it with `prisma migrate resolve --applied 20260720000000_initial` using the correct schema/environment. `migrate resolve` records history; it does not apply missing schema changes.
-4. Run `npm run db:remove-demo`. This targets the known prototype workspace/invitations only, not arbitrary customer workspaces. A seed account with a real password credential is preserved for operator review. Legacy public upload subdirectories are moved to a private quarantine, not destroyed.
+2. For the known legacy SQLite schema, run `npm run db:upgrade:legacy` to preview the exact changes. Then `npm run db:upgrade:legacy -- --apply` creates a consistent private backup and applies only the two nullable columns and three reviewed indexes. Every existing table's row count is checked inside the transaction, followed by integrity/foreign-key checks. Any other schema differences or unexpected migration history are refused; no data-loss flags, table replacements or destructive statements are used.
+3. The upgrade verifies schema equality before recording the baseline with `prisma migrate resolve --applied 20260720000000_initial`. Run `npm run db:migrate` to confirm no pending migrations. Other existing schemas, including PostgreSQL, require a separately reviewed migration; `migrate resolve` records history and must never be used to skip missing schema changes.
+4. Run `npm run db:remove-demo`. This targets the known prototype workspace/invitations only, not arbitrary customer workspaces, and clears the obsolete simulated email queue (current delivery does not use that table). A seed account with a changed password is preserved. To identify a still-default credential safely, pass `--retired-password-stdin` and supply the retired password through standard input, never a command-line password argument. A matching seed account is removed only if it has no remaining real workspace memberships; otherwise its retired password/sessions are disabled while its real workspace data and membership are preserved. Legacy public upload subdirectories are moved to a private quarantine, not destroyed.
 5. Review preserved accounts/quarantined files, restore needed user content through authenticated upload, and verify private/public access before reopening the service.
 
-`npm run db:remove-demo -- --files-only` can quarantine old public uploads without modifying database records. This is useful while a database upgrade awaits approval. Removal is explicit and never runs implicitly at application startup.
+`npm run db:remove-demo -- --files-only` can quarantine old public uploads without modifying database records. Removal is explicit and never runs implicitly at application startup. Database backups live under private storage's `database-backups/`; they contain sensitive account data and must remain access-controlled.
 
 ## Optional services
 
@@ -72,6 +72,6 @@ Invitations use manual private link delivery. The UI never says an email was que
 
 ## Verification contract
 
-`npm run lint` performs Next route type generation, TypeScript checks and `git diff --check`; it is not an ESLint rule set. `npm run build` validates a production bundle. `npm test` exercises isolated engine and product tests with actual Chromium/FFmpeg outputs, authentication/session revocation, invitations, workspace isolation, viewer roles, private media/publication revocation, real collections, analytics/lead consent, export invalidation and desktop/mobile browser flows.
+`npm run lint` performs Next route type generation, TypeScript checks and `git diff --check`; it is not an ESLint rule set. `npm run build` validates a production bundle. `npm test` exercises isolated migration/cleanup safeguards plus engine and product tests with actual Chromium/FFmpeg outputs, authentication/session revocation, invitations, workspace isolation, viewer roles, private media/publication revocation, real collections, analytics/lead consent, export invalidation and desktop/mobile browser flows.
 
 `npm run test:providers -- <authorized-public-url>` additionally calls configured live Azure AI/Speech, captures the supplied public website and renders a real narrated video. It consumes provider quota, uses temporary private storage, and leaves no sample projects in the application database.

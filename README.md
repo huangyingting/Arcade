@@ -24,7 +24,7 @@ The bootstrap command reads a password from standard input; supply a strong pass
 
 Sign in, create your workspace, and create your own projects. Platform administrators create account invitations; share the returned invitation link privately. Workspace owners/admins can then add accepted accounts as editors or viewers.
 
-**Existing installations:** do not run initial migrations against an existing nonempty database without a backup and a reviewed upgrade/baseline procedure. See [operations](docs/05_PRODUCTION_OPERATIONS.md).
+**Existing installations:** do not run initial migrations against an existing nonempty database without an upgrade/baseline procedure. `npm run db:upgrade:legacy` previews the five supported additive SQLite changes; adding `-- --apply` backs up the database, preserves/verifies all rows and records the baseline. Other schema differences are refused. See [operations](docs/05_PRODUCTION_OPERATIONS.md).
 
 ## Real capabilities and boundaries
 
